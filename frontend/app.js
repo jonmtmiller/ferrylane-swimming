@@ -143,7 +143,9 @@ const parseTime = (s) => {
 
 
 async function loadFlow() {
-  const url = 'https://environment.data.gov.uk/flood-monitoring/id/measures/2604TH-flow--i-15_min-m3_s/readings?_sorted&_limit=200';
+  //const url = 'https://environment.data.gov.uk/flood-monitoring/id/measures/2604TH-flow--i-15_min-m3_s/readings?_sorted&_limit=200';
+  const url = '/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&limit=200';
+
   try {
     const data = await (await fetch(url)).json();
     const items = (data.items||[]).map(r => ({t:new Date(r.dateTime), v:+r.value})).filter(r=>isFinite(r.v));
