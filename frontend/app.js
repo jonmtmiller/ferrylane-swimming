@@ -7,11 +7,17 @@ function since(d) {
   const dd = hr/24; return `${Math.round(dd)}d ago`;
 }
 async function loadTemps() {
+
+/*
   const debug = (msg) => {
     const el = document.getElementById('tempsDebug');
     if (el) el.textContent = String(msg);
     console.log('[temps]', msg);
   };
+*/
+  
+    // replace the debug helper with a no-op
+  const debug = () => {};
 
   // Fetch CSV from your proxy (avoids CORS)
   const res = await fetch('/api/csv/shiplake', { cache: 'no-store' });
