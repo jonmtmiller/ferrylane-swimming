@@ -29,21 +29,44 @@ async function loadTemps() {
   const delim = (firstLine.match(/,/g)?.length || 0) >= (firstLine.match(/;/g)?.length || 0) ? ',' : ';';
 
   // Robust time parser: epoch 10/13, or 'YYYY-MM-DD HH:MM(:SS)' (space or T), or ISO
-  const parseTime = (s) => {
-    if (!s) return null;
-    s = s.trim();
-    if (/^\d{10}(\.\d+)?$/.test(s)) return new Date(parseFloat(s) * 1000);
-    if (/^\d{13}$/.test(s))         return new Date(parseInt(s, 10));
-    // Common “YYYY-MM-DD HH:MM(:SS)”
-    if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(s)) {
-      // treat as UTC to be consistent
-      const iso = s.replace(' ', 'T');
-      return new Date(iso.endsWith('Z') ? iso : iso + 'Z');
-    }
-    // Try native parse as last resort
-    const d = new Date(s);
+// tolerant UTC time parser (adds support for YYYYMMDDHHMMSSZ)
+const parseTime = (s) => {
+  if (!s) return null;
+  s = String(s).trim().replace(/^"|"$/g, ''); // strip quotes if any
+
+  // 1) Compact UTC: YYYYMMDDHHMMSS or YYYYMMDDHHMMSSZ
+  //    e.g. 20250819225000Z  -> 2025-08-19 22:50:00 UTC
+  let m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(Z)?$/);
+  if (m) {
+    const [, Y, M, D, h, mnt, S] = m;
+    const d = new Date(Date.UTC(
+      parseInt(Y,10),
+      parseInt(M,10) - 1,
+      parseInt(D,10),
+      parseInt(h,10),
+      parseInt(mnt,10),
+      parseInt(S,10)
+    ));
     return isNaN(d) ? null : d;
-  };
+  }
+
+  // 2) Epoch (10 or 13 digits)
+  if (/^\d{10}(\.\d+)?$/.test(s)) return new Date(parseFloat(s) * 1000);
+  if (/^\d{13}$/.test(s))         return new Date(parseInt(s, 10));
+
+  // 3) "YYYY-MM-DD HH:MM[:SS] [UTC]" or ISO-like
+  m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)(?:\s*(UTC|GMT))?$/i);
+  if (m) {
+    const iso = `${m[1]}T${m[2]}Z`;
+    const d = new Date(iso);
+    return isNaN(d) ? null : d;
+  }
+
+  // 4) Last resort: native Date parse
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+};
+
 
   // Parse lines
   const lines = txt.split(/\r?\n/).filter(Boolean);
