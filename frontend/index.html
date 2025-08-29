@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ferry Lane Swimming <s>Club</s></title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+</head>
+<body>
+  <header class="page-header">
+    <h1 class="logo">Ferry Lane Swimming <span aria-label="Club (crossed out)" role="text"><s>Club</s></span></h1>
+    <p class="tagline">Daily river conditions for Wargrave (non‑official, community info)</p>
+  </header>
+  <main class="container">
+    <section class="now-grid" id="now">
+      <div class="card"><h2>River temperature</h2><div class="big" id="riverNow">–</div><div class="sub" id="riverUpdated">—</div></div>
+      <div class="card"><h2>Air temperature</h2><div class="big" id="airNow">–</div><div class="sub">&nbsp;</div></div>
+      <div class="card"><h2>Flow rate (Maidenhead)</h2><div class="big" id="flowNow">–</div><div class="sub" id="flowUpdated">—</div></div>
+      <div class="card" id="sewageCard"><h2>Sewage status (Wargrave)</h2><div class="big" id="edmStatus">–</div><div class="sub" id="edmDetail">—</div></div>
+      <div class="card"><h2>Weather (next 24h)</h2><div class="big" id="wxNow">–</div><div class="sub" id="wxDetail">—</div></div>
+    </section>
+    <section class="charts">
+      <div class="chart-card"><h3>Temperatures (last ~10 days)</h3><canvas id="tempChart" height="120"></canvas></div>
+      <div class="chart-card"><h3>Flow rate (last ~2 days)</h3><canvas id="flowChart" height="120"></canvas></div>
+    </section>
+    <section class="extras">
+      <div class="map card">
+        <h3>Swim stretch</h3>
+        <iframe title="Wargrave Ferry Lane area map" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade"
+          src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d9945.622407729617!2d-0.868!3d51.503!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x48769b7c3a4a36d3%3A0x6f3b2a7d8c3b9e0!2sWargrave!5e0!3m2!1sen!2suk!4v1690000000000"
+          width="100%" height="240" style="border:0;"></iframe>
+      </div>
+      <div class="card tips">
+        <h3>Notes</h3>
+        <ul>
+          <li>Info is provided by volunteers and public APIs; treat as indicative, not official safety advice.</li>
+          <li>Cold water: &lt;10 °C short dips only; 10–15 °C neoprene recommended; &gt;20 °C watch for overheating on long swims.</li>
+          <li>Flow is from the Environment Agency station at Maidenhead (closest available).</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+  <footer class="page-footer">
+    <p>Uses Environment Agency flood and river level data from the Real-time Data API (Beta). Contains public sector information licensed under the Open Government Licence v3.0.</p>
+    <p>CSV temperatures courtesy of the Shiplake sensor feed. No affiliation with Thames Water or the Environment Agency.</p>
+  </footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
