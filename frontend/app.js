@@ -7,7 +7,8 @@ function since(d) {
   const dd = hr/24; return `${Math.round(dd)}d ago`;
 }
 async function loadTemps() {
-  const url = 'https://dl1.findlays.net/rawdata/shiplake-5m-averages-latest.csv';
+  //const url = 'https://dl1.findlays.net/rawdata/shiplake-5m-averages-latest.csv';
+  const url = '/api/csv/shiplake';
   try {
     const text = await (await fetch(url, { cache: 'no-store' })).text();
     const pts = text.trim().split(/\r?\n/).map(l => l.split(','))
