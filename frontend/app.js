@@ -7,76 +7,100 @@ function since(d) {
   const dd = hr/24; return `${Math.round(dd)}d ago`;
 }
 async function loadTemps() {
-  async function fetchCsv(freq='5m') {
-    const url = freq === '1h' ? '/api/csv/shiplake?freq=1h' : '/api/csv/shiplake';
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`CSV HTTP ${res.status}`);
-    return await res.text();
-  }
+  const debug = (msg) => {
+    const el = document.getElementById('tempsDebug');
+    if (el) el.textContent = String(msg);
+    console.log('[temps]', msg);
+  };
 
-  function parseCsvToPoints(txt) {
-    const clean = txt.replace(/^\uFEFF/, '').trim(); // strip BOM
-    const lines = clean.split(/\r?\n/).filter(Boolean);
-    const out = [];
-    for (const line of lines) {
-      const [tRaw, airRaw, riverRaw] = line.split(',').map(s => s?.trim());
-      if (!tRaw) continue;
-
-      // Timestamp can be epoch seconds or ISO-like
-      let t;
-      if (/^\d{10}(\.\d+)?$/.test(tRaw)) { t = new Date(parseFloat(tRaw) * 1000); }
-      else if (/^\d{13}$/.test(tRaw))     { t = new Date(parseInt(tRaw, 10)); }
-      else {
-        const d = new Date(tRaw);
-        if (!isNaN(d)) t = d; else continue;
-      }
-
-      const air = parseFloat(airRaw);
-      const river = parseFloat(riverRaw);
-
-      // Drop rows with NaN river (feed sometimes emits 'nan' on the newest row)
-      if (!isFinite(river)) continue;
-
-      out.push({ t, air: isFinite(air) ? air : undefined, river });
-    }
-    return out.sort((a, b) => a.t - b.t);
-  }
-
-  let txt, pts = [];
-  try {
-    txt = await fetchCsv('5m');
-    pts = parseCsvToPoints(txt);
-    // Fallback to hourly if the 5-minute file yields nothing (rare)
-    if (pts.length < 3) {
-      txt = await fetchCsv('1h');
-      pts = parseCsvToPoints(txt);
-    }
-  } catch (e) {
-    console.error('CSV fetch failed', e);
-  }
-  if (!pts.length) {
-    document.getElementById('riverNow').textContent = 'No data';
-    document.getElementById('riverUpdated').textContent = '—';
+  // Fetch CSV from your proxy (avoids CORS)
+  const res = await fetch('/api/csv/shiplake', { cache: 'no-store' });
+  const raw = await res.text();
+  if (!res.ok || !raw) {
+    $('riverNow').textContent = 'No data';
+    $('riverUpdated').textContent = '—';
+    debug(`HTTP ${res.status}\n${raw.slice(0,200)}`);
     return;
   }
 
-  const last = pts[pts.length - 1];
-  document.getElementById('riverNow').textContent = `${last.river.toFixed(1)}°C`;
-  document.getElementById('airNow').textContent   = (last.air != null ? `${last.air.toFixed(1)}°C` : '—');
-  document.getElementById('riverUpdated').textContent = (() => {
-    const sec = Math.max(0, (Date.now() - last.t.getTime())/1000);
-    if (sec < 90) return `${Math.round(sec)}s ago`;
-    const min = sec/60; if (min < 90) return `${Math.round(min)}m ago`;
-    const hr = min/60; if (hr < 36) return `${Math.round(hr)}h ago`;
-    const dd = hr/24; return `${Math.round(dd)}d ago`;
-  })();
+  // Heuristics: delimiter + strip BOM + trim
+  const txt = raw.replace(/^\uFEFF/, '').trim();
+  const firstLine = txt.split(/\r?\n/, 1)[0] || '';
+  const delim = (firstLine.match(/,/g)?.length || 0) >= (firstLine.match(/;/g)?.length || 0) ? ',' : ';';
 
+  // Robust time parser: epoch 10/13, or 'YYYY-MM-DD HH:MM(:SS)' (space or T), or ISO
+  const parseTime = (s) => {
+    if (!s) return null;
+    s = s.trim();
+    if (/^\d{10}(\.\d+)?$/.test(s)) return new Date(parseFloat(s) * 1000);
+    if (/^\d{13}$/.test(s))         return new Date(parseInt(s, 10));
+    // Common “YYYY-MM-DD HH:MM(:SS)”
+    if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(s)) {
+      // treat as UTC to be consistent
+      const iso = s.replace(' ', 'T');
+      return new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+    }
+    // Try native parse as last resort
+    const d = new Date(s);
+    return isNaN(d) ? null : d;
+  };
+
+  // Parse lines
+  const lines = txt.split(/\r?\n/).filter(Boolean);
+  const points = [];
+  for (let i = 0; i < lines.length; i++) {
+    const parts = lines[i].split(delim).map(x => x.trim());
+    if (parts.length < 3) continue;
+    const [tRaw, airRaw, riverRaw] = parts;
+
+    // Skip header if present
+    const maybeHeader = i === 0 && (/[a-zA-Z]/.test(tRaw) || /air/i.test(airRaw) || /river/i.test(riverRaw));
+    if (maybeHeader) continue;
+
+    const t = parseTime(tRaw);
+    if (!t) continue;
+
+    // Accept both 'nan' and empty cells
+    const air   = /^\s*(nan|NaN)?\s*$/.test(airRaw)   ? undefined : parseFloat(airRaw);
+    const river = /^\s*(nan|NaN)?\s*$/.test(riverRaw) ? undefined : parseFloat(riverRaw);
+
+    if (!isFinite(river)) continue; // require river for plotting
+    points.push({ t, air: isFinite(air) ? air : undefined, river });
+  }
+
+  // Diagnostics (helpful if still empty)
+  debug([
+    `lines: ${lines.length}`,
+    `delimiter: "${delim}"`,
+    `firstLine: ${firstLine}`,
+    `parsed points: ${points.length}`,
+    points[0] ? `first: ${points[0].t.toISOString()} • ${points[0].river}°C` : 'first: —',
+    points.at?.(-1) ? `last:  ${points.at(-1).t.toISOString()} • ${points.at(-1).river}°C` : 'last: —',
+  ].join('\n'));
+
+  if (!points.length) {
+    $('riverNow').textContent = 'No data';
+    $('riverUpdated').textContent = '—';
+    return;
+  }
+
+  // Show latest
+  const last = points[points.length - 1];
+  $('riverNow').textContent = `${last.river.toFixed(1)}°C`;
+  $('airNow').textContent   = last.air != null ? `${last.air.toFixed(1)}°C` : '—';
+  const sec = Math.max(0, (Date.now() - last.t.getTime())/1000);
+  $('riverUpdated').textContent = sec < 90 ? `${Math.round(sec)}s ago`
+    : sec/60 < 90 ? `${Math.round(sec/60)}m ago`
+    : sec/3600 < 36 ? `${Math.round(sec/3600)}h ago`
+    : `${Math.round(sec/86400)}d ago`;
+
+  // Draw chart
   new Chart(document.getElementById('tempChart'), {
     type: 'line',
     data: {
       datasets: [
-        { label: 'River °C', data: pts.map(p => ({ x: p.t, y: p.river })) },
-        { label: 'Air °C',   data: pts.filter(p => p.air != null).map(p => ({ x: p.t, y: p.air })) }
+        { label: 'River °C', data: points.map(p => ({ x: p.t, y: p.river })) },
+        { label: 'Air °C',   data: points.filter(p => p.air != null).map(p => ({ x: p.t, y: p.air })) },
       ]
     },
     options: {
@@ -87,6 +111,7 @@ async function loadTemps() {
     }
   });
 }
+
 
 async function loadFlow() {
   const url = 'https://environment.data.gov.uk/flood-monitoring/id/measures/2604TH-flow--i-15_min-m3_s/readings?_sorted&_limit=200';
