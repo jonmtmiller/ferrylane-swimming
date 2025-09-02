@@ -86,6 +86,7 @@ console.info('[temps]',
   // If the available span is shorter than requested, fall back to hourly
   const spanDays = all.length ? (all[all.length-1].t - all[0].t) / (24*60*60*1000) : 0;
   if (spanDays + 0.1 < days) {
+    console.info('Falling back to hourly');
     try {
       const hourly = await fetchCsv('1h');
       if (hourly.length) { all = hourly; source = 'hourly'; }
@@ -103,6 +104,13 @@ console.info('[temps]',
   const endMs = all[all.length - 1].t.getTime();
   const cutMs = endMs - days * 24*60*60*1000;
   const pts = all.filter(p => p.t.getTime() >= cutMs);
+
+  console.info(endms, cutms, pts.length);
+  console.info('[pts]',
+  'rows:', pts.length,
+  'first:', pts[0]?.t?.toISOString(),
+  'last:',  pts.at?.(-1)?.t?.toISOString()
+);
 
   if (!pts.length) {
     elRiverNow.textContent = 'No data';
