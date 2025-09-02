@@ -21,65 +21,103 @@ function since(d) {
 }
 
 async function loadTemps(days = 10) {
-  // pick 5-minute CSV for <=10 days, hourly CSV for longer windows
-  const useHourly = days > 10;
-  const url = useHourly ? '/api/csv/shiplake?freq=1h' : '/api/csv/shiplake';
+  const elRiverNow = document.getElementById('riverNow');
+  const elAirNow = document.getElementById('airNow');
+  const elUpdated = document.getElementById('riverUpdated');
+  const titleEl = document.getElementById('tempTitle');
 
-  const res = await fetch(url, { cache: 'no-store' });
-  const raw = await res.text();
-  if (!res.ok || !raw) { riverNow.textContent = 'No data'; riverUpdated.textContent = '—'; return; }
-
-  const txt = raw.replace(/^\uFEFF/, '').trim();
-  const lines = txt.split(/\r?\n/).filter(Boolean);
-  if (!lines.length) { riverNow.textContent = 'No data'; riverUpdated.textContent = '—'; return; }
-
-  const firstLine = lines[0] || '';
-  const delim = (firstLine.match(/,/g)?.length || 0) >= (firstLine.match(/;/g)?.length || 0) ? ',' : ';';
-  const startIdx = /date/i.test(firstLine) ? 1 : 0;
-
-  // robust time parser (includes compact UTC: YYYYMMDDHHMMSSZ)
   const parseTime = (s) => {
     if (!s) return null;
     s = String(s).trim().replace(/^"|"$/g, '');
+    // Compact UTC: YYYYMMDDHHMMSS(Z)
     let m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(Z)?$/);
     if (m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
+    // Epochs
     if (/^\d{10}(\.\d+)?$/.test(s)) return new Date(parseFloat(s) * 1000);
     if (/^\d{13}$/.test(s))         return new Date(parseInt(s, 10));
+    // ISO-ish "YYYY-MM-DD HH:mm(:ss) [UTC]"
     m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)(?:\s*(UTC|GMT))?$/i);
     if (m) return new Date(`${m[1]}T${m[2]}Z`);
     const d = new Date(s);
     return isNaN(d) ? null : d;
   };
 
-  const all = [];
-  for (let i = startIdx; i < lines.length; i++) {
-    const parts = lines[i].split(delim).map(x => x.trim());
-    if (parts.length < 3) continue;
-    const t = parseTime(parts[0]); if (!t) continue;
-    const airRaw = parts[1], riverRaw = parts[2];
-    const air   = /^\s*(nan|NaN)?\s*$/.test(airRaw)   ? undefined : parseFloat(airRaw);
-    const river = /^\s*(nan|NaN)?\s*$/.test(riverRaw) ? undefined : parseFloat(riverRaw);
-    if (!isFinite(river)) continue;
-    all.push({ t, air: isFinite(air) ? air : undefined, river });
+  const parseCsv = (txt) => {
+    const clean = txt.replace(/^\uFEFF/, '').trim();
+    if (!clean) return [];
+    const lines = clean.split(/\r?\n/).filter(Boolean);
+    if (!lines.length) return [];
+    const firstLine = lines[0];
+    const delim = (firstLine.match(/,/g)?.length || 0) >= (firstLine.match(/;/g)?.length || 0) ? ',' : ';';
+    const startIdx = /date/i.test(firstLine) ? 1 : 0;
+
+    const out = [];
+    for (let i = startIdx; i < lines.length; i++) {
+      const parts = lines[i].split(delim).map(x => x.trim());
+      if (parts.length < 3) continue;
+      const t = parseTime(parts[0]); if (!t) continue;
+      const airRaw = parts[1], riverRaw = parts[2];
+      const air   = /^\s*(nan|NaN)?\s*$/.test(airRaw)   ? undefined : parseFloat(airRaw);
+      const river = /^\s*(nan|NaN)?\s*$/.test(riverRaw) ? undefined : parseFloat(riverRaw);
+      if (!isFinite(river)) continue;
+      out.push({ t, air: isFinite(air) ? air : undefined, river });
+    }
+    return out.sort((a,b) => a.t - b.t);
+  };
+
+  async function fetchCsv(freq /* '5m' | '1h' */) {
+    const url = freq === '1h' ? '/api/csv/shiplake?freq=1h' : '/api/csv/shiplake';
+    const res = await fetch(url, { cache: 'no-store' });
+    const raw = await res.text();
+    if (!res.ok) throw new Error(`CSV ${freq} HTTP ${res.status}`);
+    return parseCsv(raw);
   }
 
-  // filter to selected window
-  const cut = Date.now() - days*DAY;
-  const pts = all.filter(p => p.t.getTime() >= cut).sort((a,b)=>a.t-b.t);
-  if (!pts.length) { riverNow.textContent='No data'; riverUpdated.textContent='—'; return; }
+  // 1) Try 5-minute file first
+  let source = '5-minute', all = await fetchCsv('5m');
 
-  // Now panel
+  // If the available span is shorter than requested, fall back to hourly
+  const spanDays = all.length ? (all[all.length-1].t - all[0].t) / (24*60*60*1000) : 0;
+  if (spanDays + 0.1 < days) {
+    try {
+      const hourly = await fetchCsv('1h');
+      if (hourly.length) { all = hourly; source = 'hourly'; }
+    } catch (_) { /* ignore, keep 5m if hourly fails */ }
+  }
+
+  if (!all.length) {
+    elRiverNow.textContent = 'No data';
+    elAirNow.textContent = '—';
+    elUpdated.textContent = '—';
+    return;
+  }
+
+  // 2) Cut window relative to the LAST timestamp in the dataset (not "now")
+  const endMs = all[all.length - 1].t.getTime();
+  const cutMs = endMs - days * 24*60*60*1000;
+  const pts = all.filter(p => p.t.getTime() >= cutMs);
+
+  if (!pts.length) {
+    elRiverNow.textContent = 'No data';
+    elAirNow.textContent = '—';
+    elUpdated.textContent = '—';
+    return;
+  }
+
+  // 3) Update "Now" panel from the last point
   const last = pts[pts.length - 1];
-  riverNow.textContent = `${last.river.toFixed(1)}°C`;
-  airNow.textContent   = last.air != null ? `${last.air.toFixed(1)}°C` : '—';
+  elRiverNow.textContent = `${last.river.toFixed(1)}°C`;
+  elAirNow.textContent   = last.air != null ? `${last.air.toFixed(1)}°C` : '—';
   const sec = Math.max(0, (Date.now() - last.t.getTime())/1000);
-  riverUpdated.textContent = sec < 90 ? `${Math.round(sec)}s ago`
+  elUpdated.textContent = sec < 90 ? `${Math.round(sec)}s ago`
     : sec/60 < 90 ? `${Math.round(sec/60)}m ago`
     : sec/3600 < 36 ? `${Math.round(sec/3600)}h ago`
     : `${Math.round(sec/86400)}d ago`;
 
-  // Title + chart
-  document.getElementById('tempTitle').textContent = `Temperatures (last ${days} days)`;
+  // 4) Title shows requested range + data source used (optional)
+  titleEl.textContent = `Temperatures (last ${days} days${source === 'hourly' ? ' • hourly data' : ''})`;
+
+  // 5) Render chart
   tempChart?.destroy();
   tempChart = new Chart(document.getElementById('tempChart'), {
     type: 'line',
@@ -102,6 +140,7 @@ async function loadTemps(days = 10) {
 
   setActive('tempRanges', days);
 }
+
 
 
 
