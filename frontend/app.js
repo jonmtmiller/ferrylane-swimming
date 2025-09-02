@@ -76,6 +76,13 @@ async function loadTemps(days = 10) {
   // 1) Try 5-minute file first
   let source = '5-minute', all = await fetchCsv('5m');
 
+console.info('[temps]',
+  'rows:', all.length,
+  'first:', all[0]?.t?.toISOString(),
+  'last:',  all.at?.(-1)?.t?.toISOString()
+);
+
+  
   // If the available span is shorter than requested, fall back to hourly
   const spanDays = all.length ? (all[all.length-1].t - all[0].t) / (24*60*60*1000) : 0;
   if (spanDays + 0.1 < days) {
