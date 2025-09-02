@@ -105,7 +105,7 @@ console.info('[temps]',
   const cutMs = endMs - days * 24*60*60*1000;
   const pts = all.filter(p => p.t.getTime() >= cutMs);
 
-  console.info(endms, cutms, pts.length);
+  console.info(endMs, cutMs, pts.length);
   console.info('[pts]',
   'rows:', pts.length,
   'first:', pts[0]?.t?.toISOString(),
