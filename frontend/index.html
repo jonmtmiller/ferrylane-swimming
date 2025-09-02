@@ -23,8 +23,29 @@
       <div class="card"><h2>Weather (next 24h)</h2><div class="big" id="wxNow">–</div><div class="sub" id="wxDetail">—</div></div>
     </section>
     <section class="charts">
-      <div class="chart-card"><h3>Temperatures (last ~10 days)</h3><canvas id="tempChart" height="120"></canvas></div>
-      <div class="chart-card"><h3>Flow rate (last ~2 days)</h3><canvas id="flowChart" height="120"></canvas></div>
+      <div class="chart-card">
+  <h3 id="tempTitle">Temperatures</h3>
+  <div class="range-buttons" id="tempRanges" role="group" aria-label="Temperature range">
+    <button class="btn" data-days="1">24h</button>
+    <button class="btn active" data-days="7">7d</button>
+    <button class="btn" data-days="10">10d</button>
+    <button class="btn" data-days="30">30d</button>
+    <button class="btn" data-days="90">90d</button>
+  </div>
+  <canvas id="tempChart" height="120"></canvas>
+</div>
+
+<div class="chart-card">
+  <h3 id="flowTitle">Flow rate</h3>
+  <div class="range-buttons" id="flowRanges" role="group" aria-label="Flow range">
+    <button class="btn" data-days="1">24h</button>
+    <button class="btn active" data-days="7">7d</button>
+    <button class="btn" data-days="14">14d</button>
+    <button class="btn" data-days="30">30d</button>
+  </div>
+  <canvas id="flowChart" height="120"></canvas>
+</div>
+
     </section>
     <section class="extras">
       <div class="map card">
