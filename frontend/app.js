@@ -1,6 +1,4 @@
 const $ = (id) => document.getElementById(id);
-const DAY = 24*60*60*1000;
-const daysAgoISO = (n) => new Date(Date.now() - n*DAY).toISOString();
 
 let tempChart, flowChart;
 const DAY = 24*60*60*1000;
