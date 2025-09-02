@@ -19,3 +19,11 @@ body { margin:0; font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif; ba
 .page-footer { color: var(--muted); padding: 20px 16px; border-top: 1px solid rgba(255,255,255,.06); text-align:center; font-size:.9rem; }
 a { color: var(--accent); }
 #sewageCard.alert { outline:2px solid #ff8a8a; box-shadow: 0 0 0 3px rgba(255,138,138,.25); }
+.range-buttons { display:flex; gap:6px; margin: 6px 0 10px; flex-wrap:wrap; }
+.range-buttons .btn {
+  font: 600 12px/1 system-ui, Segoe UI, sans-serif;
+  padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04); color: var(--text); cursor: pointer;
+}
+.range-buttons .btn:hover { background: rgba(255,255,255,.08); }
+.range-buttons .btn.active { background: var(--accent); border-color: var(--accent); color: #05121d; }
