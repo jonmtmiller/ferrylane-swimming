@@ -1,4 +1,7 @@
 const $ = (id) => document.getElementById(id);
+const DAY = 24*60*60*1000;
+const daysAgoISO = (n) => new Date(Date.now() - n*DAY).toISOString();
+
 function since(d) {
   const sec = Math.max(0, (Date.now() - d.getTime())/1000);
   if (sec < 90) return `${Math.round(sec)}s ago`;
@@ -6,163 +9,134 @@ function since(d) {
   const hr = min/60; if (hr < 36) return `${Math.round(hr)}h ago`;
   const dd = hr/24; return `${Math.round(dd)}d ago`;
 }
+
+
 async function loadTemps() {
-
-/*
-  const debug = (msg) => {
-    const el = document.getElementById('tempsDebug');
-    if (el) el.textContent = String(msg);
-    console.log('[temps]', msg);
-  };
-*/
-  
-    // replace the debug helper with a no-op
-  const debug = () => {};
-
-  // Fetch CSV from your proxy (avoids CORS)
   const res = await fetch('/api/csv/shiplake', { cache: 'no-store' });
   const raw = await res.text();
-  if (!res.ok || !raw) {
-    $('riverNow').textContent = 'No data';
-    $('riverUpdated').textContent = '—';
-    debug(`HTTP ${res.status}\n${raw.slice(0,200)}`);
-    return;
-  }
+  if (!res.ok || !raw) { riverNow.textContent='No data'; riverUpdated.textContent='—'; return; }
 
-  // Heuristics: delimiter + strip BOM + trim
   const txt = raw.replace(/^\uFEFF/, '').trim();
-  const firstLine = txt.split(/\r?\n/, 1)[0] || '';
-  const delim = (firstLine.match(/,/g)?.length || 0) >= (firstLine.match(/;/g)?.length || 0) ? ',' : ';';
-
-  // Robust time parser: epoch 10/13, or 'YYYY-MM-DD HH:MM(:SS)' (space or T), or ISO
-// tolerant UTC time parser (adds support for YYYYMMDDHHMMSSZ)
-const parseTime = (s) => {
-  if (!s) return null;
-  s = String(s).trim().replace(/^"|"$/g, ''); // strip quotes if any
-
-  // 1) Compact UTC: YYYYMMDDHHMMSS or YYYYMMDDHHMMSSZ
-  //    e.g. 20250819225000Z  -> 2025-08-19 22:50:00 UTC
-  let m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(Z)?$/);
-  if (m) {
-    const [, Y, M, D, h, mnt, S] = m;
-    const d = new Date(Date.UTC(
-      parseInt(Y,10),
-      parseInt(M,10) - 1,
-      parseInt(D,10),
-      parseInt(h,10),
-      parseInt(mnt,10),
-      parseInt(S,10)
-    ));
-    return isNaN(d) ? null : d;
-  }
-
-  // 2) Epoch (10 or 13 digits)
-  if (/^\d{10}(\.\d+)?$/.test(s)) return new Date(parseFloat(s) * 1000);
-  if (/^\d{13}$/.test(s))         return new Date(parseInt(s, 10));
-
-  // 3) "YYYY-MM-DD HH:MM[:SS] [UTC]" or ISO-like
-  m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)(?:\s*(UTC|GMT))?$/i);
-  if (m) {
-    const iso = `${m[1]}T${m[2]}Z`;
-    const d = new Date(iso);
-    return isNaN(d) ? null : d;
-  }
-
-  // 4) Last resort: native Date parse
-  const d = new Date(s);
-  return isNaN(d) ? null : d;
-};
-
-
-  // Parse lines
   const lines = txt.split(/\r?\n/).filter(Boolean);
-  const points = [];
-  for (let i = 0; i < lines.length; i++) {
+
+  // Detect delimiter and header
+  const firstLine = lines[0] || '';
+  const delim = (firstLine.match(/,/g)?.length || 0) >= (firstLine.match(/;/g)?.length || 0) ? ',' : ';';
+  const startIdx = /date/i.test(firstLine) ? 1 : 0;
+
+  // Your working parseTime that handles YYYYMMDDHHMMSSZ stays the same
+  const parseTime = (s) => {
+    if (!s) return null;
+    s = String(s).trim().replace(/^"|"$/g, '');
+    let m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(Z)?$/);
+    if (m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
+    if (/^\d{10}(\.\d+)?$/.test(s)) return new Date(parseFloat(s) * 1000);
+    if (/^\d{13}$/.test(s))         return new Date(parseInt(s, 10));
+    m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)(?:\s*(UTC|GMT))?$/i);
+    if (m) return new Date(`${m[1]}T${m[2]}Z`);
+    const d = new Date(s);
+    return isNaN(d) ? null : d;
+  };
+
+  // Parse rows
+  const all = [];
+  for (let i = startIdx; i < lines.length; i++) {
     const parts = lines[i].split(delim).map(x => x.trim());
     if (parts.length < 3) continue;
-    const [tRaw, airRaw, riverRaw] = parts;
-
-    // Skip header if present
-    const maybeHeader = i === 0 && (/[a-zA-Z]/.test(tRaw) || /air/i.test(airRaw) || /river/i.test(riverRaw));
-    if (maybeHeader) continue;
-
-    const t = parseTime(tRaw);
-    if (!t) continue;
-
-    // Accept both 'nan' and empty cells
-    const air   = /^\s*(nan|NaN)?\s*$/.test(airRaw)   ? undefined : parseFloat(airRaw);
-    const river = /^\s*(nan|NaN)?\s*$/.test(riverRaw) ? undefined : parseFloat(riverRaw);
-
-    if (!isFinite(river)) continue; // require river for plotting
-    points.push({ t, air: isFinite(air) ? air : undefined, river });
+    const t = parseTime(parts[0]); if (!t) continue;
+    const air   = /^\s*(nan|NaN)?\s*$/.test(parts[1]) ? undefined : parseFloat(parts[1]);
+    const river = /^\s*(nan|NaN)?\s*$/.test(parts[2]) ? undefined : parseFloat(parts[2]);
+    if (!isFinite(river)) continue;
+    all.push({ t, air: isFinite(air) ? air : undefined, river });
   }
 
-  // Diagnostics (helpful if still empty)
-  debug([
-    `lines: ${lines.length}`,
-    `delimiter: "${delim}"`,
-    `firstLine: ${firstLine}`,
-    `parsed points: ${points.length}`,
-    points[0] ? `first: ${points[0].t.toISOString()} • ${points[0].river}°C` : 'first: —',
-    points.at?.(-1) ? `last:  ${points.at(-1).t.toISOString()} • ${points.at(-1).river}°C` : 'last: —',
-  ].join('\n'));
+  // Keep last 10 days explicitly
+  const cut = Date.now() - 10*DAY;
+  const pts = all.filter(p => p.t.getTime() >= cut);
+  if (!pts.length) { riverNow.textContent='No data'; riverUpdated.textContent='—'; return; }
 
-  if (!points.length) {
-    $('riverNow').textContent = 'No data';
-    $('riverUpdated').textContent = '—';
-    return;
-  }
-
-  // Show latest
-  const last = points[points.length - 1];
-  $('riverNow').textContent = `${last.river.toFixed(1)}°C`;
-  $('airNow').textContent   = last.air != null ? `${last.air.toFixed(1)}°C` : '—';
+  // Now panel
+  const last = pts[pts.length - 1];
+  riverNow.textContent = `${last.river.toFixed(1)}°C`;
+  airNow.textContent   = last.air != null ? `${last.air.toFixed(1)}°C` : '—';
   const sec = Math.max(0, (Date.now() - last.t.getTime())/1000);
-  $('riverUpdated').textContent = sec < 90 ? `${Math.round(sec)}s ago`
+  riverUpdated.textContent = sec < 90 ? `${Math.round(sec)}s ago`
     : sec/60 < 90 ? `${Math.round(sec/60)}m ago`
     : sec/3600 < 36 ? `${Math.round(sec/3600)}h ago`
     : `${Math.round(sec/86400)}d ago`;
 
-  // Draw chart
+  // Update chart title text to reflect actual window
+  document.querySelector('h3:nth-of-type(1)').textContent = 'Temperatures (last 10 days)';
+
   new Chart(document.getElementById('tempChart'), {
     type: 'line',
     data: {
       datasets: [
-        { label: 'River °C', data: points.map(p => ({ x: p.t, y: p.river })) },
-        { label: 'Air °C',   data: points.filter(p => p.air != null).map(p => ({ x: p.t, y: p.air })) },
+        { label: 'River °C', data: pts.map(p => ({ x: p.t, y: p.river })) },
+        { label: 'Air °C',   data: pts.filter(p => p.air != null).map(p => ({ x: p.t, y: p.air })) },
       ]
     },
     options: {
       animation: false, parsing: false, responsive: true,
+      plugins: {
+        legend: { position: 'bottom' },
+        // keep charts fast with thousands of points
+        decimation: { enabled: true, algorithm: 'min-max' } // or 'lttb'
+      },
       interaction: { intersect: false, mode: 'nearest' },
-      scales: { x: { type: 'time', time: { unit: 'hour' } }, y: { title: { display: true, text: '°C' } } },
-      plugins: { legend: { position: 'bottom' } }
+      scales: {
+        x: { type: 'time', time: { unit: 'day' } },   // <-- show day ticks
+        y: { title: { display: true, text: '°C' } }
+      }
     }
   });
 }
 
 
-async function loadFlow() {
-  //const url = 'https://environment.data.gov.uk/flood-monitoring/id/measures/2604TH-flow--i-15_min-m3_s/readings?_sorted&_limit=200';
-  const url = '/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&limit=200';
 
+async function loadFlow() {
+  const since = daysAgoISO(14);
+  const url = `/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&since=${encodeURIComponent(since)}&limit=10000`;
+  let data;
   try {
-    const data = await (await fetch(url)).json();
-    const items = (data.items||[]).map(r => ({t:new Date(r.dateTime), v:+r.value})).filter(r=>isFinite(r.v));
-    if (!items.length) return;
-    const last = items[items.length-1];
-    $('flowNow').textContent = `${last.v.toFixed(1)} m³/s`;
-    $('flowUpdated').textContent = since(last.t);
-    new Chart(document.getElementById('flowChart'), {
-      type:'line',
-      data:{ datasets:[{ label:'Flow (m³/s)', data: items.map(r=>({x:r.t,y:r.v})) }] },
-      options:{ animation:false, parsing:false, responsive:true,
-        scales:{ x:{type:'time', time:{unit:'hour'}}, y:{title:{display:true,text:'m³/s'}} },
-        plugins:{ legend:{position:'bottom'} }
+    data = await (await fetch(url, { cache: 'no-store' })).json();
+  } catch (e) { console.error('EA fetch failed', e); flowNow.textContent='Unavailable'; flowUpdated.textContent='—'; return; }
+
+  const items = (data.items || [])
+    .map(r => ({ t: new Date(r.dateTime), v: +r.value }))
+    .filter(r => isFinite(r.v))
+    .sort((a,b) => a.t - b.t);
+
+  if (!items.length) { flowNow.textContent='No data'; flowUpdated.textContent='—'; return; }
+
+  const last = items[items.length - 1];
+  flowNow.textContent = `${last.v.toFixed(1)} m³/s`;
+  const sec = Math.max(0, (Date.now() - last.t.getTime())/1000);
+  flowUpdated.textContent = sec < 90 ? `${Math.round(sec)}s ago`
+    : sec/60 < 90 ? `${Math.round(sec/60)}m ago`
+    : sec/3600 < 36 ? `${Math.round(sec/3600)}h ago`
+    : `${Math.round(sec/86400)}d ago`;
+
+  // Update chart title text
+  document.querySelector('h3:nth-of-type(2)').textContent = 'Flow rate (last 14 days)';
+
+  new Chart(document.getElementById('flowChart'), {
+    type: 'line',
+    data: { datasets: [{ label: 'Flow (m³/s)', data: items.map(r => ({ x: r.t, y: r.v })) }] },
+    options: {
+      animation:false, parsing:false, responsive:true,
+      plugins: { legend:{ position:'bottom' }, decimation:{ enabled:true, algorithm:'min-max' } },
+      scales: {
+        x:{ type:'time', time:{ unit:'day' } },   // <-- day ticks
+        y:{ title:{ display:true, text:'m³/s' } }
       }
-    });
-  } catch(e){ console.error('EA fetch failed', e); }
+    }
+  });
 }
+
+
+
+
 async function loadEDM() {
   try {
     const res = await fetch('/api/tw/status?site=Wargrave', { cache: 'no-store' });
