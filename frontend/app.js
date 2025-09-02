@@ -2,6 +2,18 @@ const $ = (id) => document.getElementById(id);
 const DAY = 24*60*60*1000;
 const daysAgoISO = (n) => new Date(Date.now() - n*DAY).toISOString();
 
+let tempChart, flowChart;
+const DAY = 24*60*60*1000;
+const daysAgoISO = (n) => new Date(Date.now() - n*DAY).toISOString();
+
+function setActive(groupId, days) {
+  const g = document.getElementById(groupId);
+  if (!g) return;
+  [...g.querySelectorAll('button[data-days]')]
+    .forEach(b => b.classList.toggle('active', b.dataset.days === String(days)));
+}
+
+
 function since(d) {
   const sec = Math.max(0, (Date.now() - d.getTime())/1000);
   if (sec < 90) return `${Math.round(sec)}s ago`;
@@ -10,21 +22,24 @@ function since(d) {
   const dd = hr/24; return `${Math.round(dd)}d ago`;
 }
 
+async function loadTemps(days = 10) {
+  // pick 5-minute CSV for <=10 days, hourly CSV for longer windows
+  const useHourly = days > 10;
+  const url = useHourly ? '/api/csv/shiplake?freq=1h' : '/api/csv/shiplake';
 
-async function loadTemps() {
-  const res = await fetch('/api/csv/shiplake', { cache: 'no-store' });
+  const res = await fetch(url, { cache: 'no-store' });
   const raw = await res.text();
-  if (!res.ok || !raw) { riverNow.textContent='No data'; riverUpdated.textContent='—'; return; }
+  if (!res.ok || !raw) { riverNow.textContent = 'No data'; riverUpdated.textContent = '—'; return; }
 
   const txt = raw.replace(/^\uFEFF/, '').trim();
   const lines = txt.split(/\r?\n/).filter(Boolean);
+  if (!lines.length) { riverNow.textContent = 'No data'; riverUpdated.textContent = '—'; return; }
 
-  // Detect delimiter and header
   const firstLine = lines[0] || '';
   const delim = (firstLine.match(/,/g)?.length || 0) >= (firstLine.match(/;/g)?.length || 0) ? ',' : ';';
   const startIdx = /date/i.test(firstLine) ? 1 : 0;
 
-  // Your working parseTime that handles YYYYMMDDHHMMSSZ stays the same
+  // robust time parser (includes compact UTC: YYYYMMDDHHMMSSZ)
   const parseTime = (s) => {
     if (!s) return null;
     s = String(s).trim().replace(/^"|"$/g, '');
@@ -38,21 +53,21 @@ async function loadTemps() {
     return isNaN(d) ? null : d;
   };
 
-  // Parse rows
   const all = [];
   for (let i = startIdx; i < lines.length; i++) {
     const parts = lines[i].split(delim).map(x => x.trim());
     if (parts.length < 3) continue;
     const t = parseTime(parts[0]); if (!t) continue;
-    const air   = /^\s*(nan|NaN)?\s*$/.test(parts[1]) ? undefined : parseFloat(parts[1]);
-    const river = /^\s*(nan|NaN)?\s*$/.test(parts[2]) ? undefined : parseFloat(parts[2]);
+    const airRaw = parts[1], riverRaw = parts[2];
+    const air   = /^\s*(nan|NaN)?\s*$/.test(airRaw)   ? undefined : parseFloat(airRaw);
+    const river = /^\s*(nan|NaN)?\s*$/.test(riverRaw) ? undefined : parseFloat(riverRaw);
     if (!isFinite(river)) continue;
     all.push({ t, air: isFinite(air) ? air : undefined, river });
   }
 
-  // Keep last 10 days explicitly
-  const cut = Date.now() - 10*DAY;
-  const pts = all.filter(p => p.t.getTime() >= cut);
+  // filter to selected window
+  const cut = Date.now() - days*DAY;
+  const pts = all.filter(p => p.t.getTime() >= cut).sort((a,b)=>a.t-b.t);
   if (!pts.length) { riverNow.textContent='No data'; riverUpdated.textContent='—'; return; }
 
   // Now panel
@@ -65,10 +80,10 @@ async function loadTemps() {
     : sec/3600 < 36 ? `${Math.round(sec/3600)}h ago`
     : `${Math.round(sec/86400)}d ago`;
 
-  // Update chart title text to reflect actual window
-  document.querySelector('h3:nth-of-type(1)').textContent = 'Temperatures (last 10 days)';
-
-  new Chart(document.getElementById('tempChart'), {
+  // Title + chart
+  document.getElementById('tempTitle').textContent = `Temperatures (last ${days} days)`;
+  tempChart?.destroy();
+  tempChart = new Chart(document.getElementById('tempChart'), {
     type: 'line',
     data: {
       datasets: [
@@ -78,29 +93,33 @@ async function loadTemps() {
     },
     options: {
       animation: false, parsing: false, responsive: true,
-      plugins: {
-        legend: { position: 'bottom' },
-        // keep charts fast with thousands of points
-        decimation: { enabled: true, algorithm: 'min-max' } // or 'lttb'
-      },
+      plugins: { legend: { position: 'bottom' }, decimation: { enabled: true, algorithm: 'min-max' } },
       interaction: { intersect: false, mode: 'nearest' },
       scales: {
-        x: { type: 'time', time: { unit: 'day' } },   // <-- show day ticks
+        x: { type: 'time', time: { unit: days <= 2 ? 'hour' : 'day' } },
         y: { title: { display: true, text: '°C' } }
       }
     }
   });
+
+  setActive('tempRanges', days);
 }
 
 
 
-async function loadFlow() {
-  const since = daysAgoISO(14);
-  const url = `/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&since=${encodeURIComponent(since)}&limit=10000`;
+
+async function loadFlow(days = 14) {
+  const since = daysAgoISO(days);
+  const url = `/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&since=${encodeURIComponent(since)}&limit=${days>30?20000:10000}`;
+
   let data;
   try {
     data = await (await fetch(url, { cache: 'no-store' })).json();
-  } catch (e) { console.error('EA fetch failed', e); flowNow.textContent='Unavailable'; flowUpdated.textContent='—'; return; }
+  } catch (e) {
+    console.error('EA fetch failed', e);
+    flowNow.textContent='Unavailable'; flowUpdated.textContent='—';
+    return;
+  }
 
   const items = (data.items || [])
     .map(r => ({ t: new Date(r.dateTime), v: +r.value }))
@@ -117,22 +136,24 @@ async function loadFlow() {
     : sec/3600 < 36 ? `${Math.round(sec/3600)}h ago`
     : `${Math.round(sec/86400)}d ago`;
 
-  // Update chart title text
-  document.querySelector('h3:nth-of-type(2)').textContent = 'Flow rate (last 14 days)';
-
-  new Chart(document.getElementById('flowChart'), {
-    type: 'line',
-    data: { datasets: [{ label: 'Flow (m³/s)', data: items.map(r => ({ x: r.t, y: r.v })) }] },
-    options: {
+  document.getElementById('flowTitle').textContent = `Flow rate (last ${days} days)`;
+  flowChart?.destroy();
+  flowChart = new Chart(document.getElementById('flowChart'), {
+    type:'line',
+    data:{ datasets:[{ label:'Flow (m³/s)', data: items.map(r=>({x:r.t,y:r.v})) }] },
+    options:{
       animation:false, parsing:false, responsive:true,
-      plugins: { legend:{ position:'bottom' }, decimation:{ enabled:true, algorithm:'min-max' } },
-      scales: {
-        x:{ type:'time', time:{ unit:'day' } },   // <-- day ticks
+      plugins:{ legend:{ position:'bottom' }, decimation:{ enabled:true, algorithm:'min-max' } },
+      scales:{
+        x:{ type:'time', time:{ unit: days <= 2 ? 'hour' : 'day' } },
         y:{ title:{ display:true, text:'m³/s' } }
       }
     }
   });
+
+  setActive('flowRanges', days);
 }
+
 
 
 
@@ -171,4 +192,24 @@ async function loadWeather() {
     }).join(' · ');
   } catch(e){ console.error('weather failed', e); }
 }
-window.addEventListener('DOMContentLoaded', ()=>{ loadTemps(); loadFlow(); loadEDM(); loadWeather(); });
+
+
+
+window.addEventListener('DOMContentLoaded', () => {
+  // defaults that match the 'active' buttons
+  loadTemps(10);
+  loadFlow(14);
+  loadEDM();
+  loadWeather();
+
+  // range button handlers
+  document.getElementById('tempRanges')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-days]'); if (!btn) return;
+    loadTemps(parseInt(btn.dataset.days, 10));
+  });
+  document.getElementById('flowRanges')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-days]'); if (!btn) return;
+    loadFlow(parseInt(btn.dataset.days, 10));
+  });
+});
+
