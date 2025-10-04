@@ -192,51 +192,91 @@ tempChart = new Chart(document.getElementById('tempChart'), {
 
 
 async function loadFlow(days = 14) {
-  const since = daysAgoISO(days);
-  const url = `/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&since=${encodeURIComponent(since)}&limit=${days>30?20000:10000}`;
+  const DAY = 24 * 60 * 60 * 1000;
+  const sinceISO = new Date(Date.now() - days * DAY).toISOString();
+
+  // Ask your proxy for a big enough window (limit ~= 15-min samples per day)
+  const estLimit = Math.ceil(days * 96 * 1.2); // buffer
+  const url = `/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&since=${encodeURIComponent(sinceISO)}&limit=${estLimit}`;
 
   let data;
   try {
-    data = await (await fetch(url, { cache: 'no-store' })).json();
+    const res = await fetch(url, { cache: 'no-store' });
+    data = await res.json();
   } catch (e) {
     console.error('EA fetch failed', e);
-    flowNow.textContent='Unavailable'; flowUpdated.textContent='—';
+    flowNow.textContent = 'Unavailable';
+    flowUpdated.textContent = '—';
     return;
   }
 
   const items = (data.items || [])
-    .map(r => ({ t: new Date(r.dateTime), v: +r.value }))
-    .filter(r => isFinite(r.v))
-    .sort((a,b) => a.t - b.t);
+    .map(r => ({ t: new Date(r.dateTime), v: Number(r.value) }))
+    .filter(r => Number.isFinite(r.v))
+    .sort((a, b) => a.t - b.t);
 
-  if (!items.length) { flowNow.textContent='No data'; flowUpdated.textContent='—'; return; }
+  if (!items.length) {
+    flowNow.textContent = 'No data';
+    flowUpdated.textContent = '—';
+    return;
+  }
 
-  const last = items[items.length - 1];
+  // Anchor the window to the newest reading we actually have
+  const endMs = items[items.length - 1].t.getTime();
+  const cutMs = endMs - days * DAY;
+  const pts = items.filter(p => p.t.getTime() >= cutMs);
+  if (!pts.length) {
+    flowNow.textContent = 'No data';
+    flowUpdated.textContent = '—';
+    return;
+  }
+
+  // “Now” panel
+  const last = pts[pts.length - 1];
   flowNow.textContent = `${last.v.toFixed(1)} m³/s`;
-  const sec = Math.max(0, (Date.now() - last.t.getTime())/1000);
-  flowUpdated.textContent = sec < 90 ? `${Math.round(sec)}s ago`
-    : sec/60 < 90 ? `${Math.round(sec/60)}m ago`
-    : sec/3600 < 36 ? `${Math.round(sec/3600)}h ago`
-    : `${Math.round(sec/86400)}d ago`;
+  const sec = Math.max(0, (Date.now() - last.t.getTime()) / 1000);
+  flowUpdated.textContent =
+    sec < 90 ? `${Math.round(sec)}s ago`
+    : sec / 60 < 90 ? `${Math.round(sec / 60)}m ago`
+    : sec / 3600 < 36 ? `${Math.round(sec / 3600)}h ago`
+    : `${Math.round(sec / 86400)}d ago`;
 
+  // Title + chart (NOTE: feed milliseconds to x, and set min/max)
   document.getElementById('flowTitle').textContent = `Flow rate (last ${days} days)`;
+  const xMin = pts[0].t.getTime();
+  const xMax = pts[pts.length - 1].t.getTime();
+
   flowChart?.destroy();
   flowChart = new Chart(document.getElementById('flowChart'), {
-    type:'line',
-    data:{ datasets:[{ label:'Flow (m³/s)', data: items.map(r=>({x:r.t,y:r.v})) }] },
-    options:{
-      animation:false, parsing:false, responsive:true,
-      plugins:{ legend:{ position:'bottom' }, decimation:{ enabled:true, algorithm:'min-max' } },
-      scales:{
-        x:{ type:'time', time:{ unit: days <= 2 ? 'hour' : 'day' } },
-        y:{ title:{ display:true, text:'m³/s' } }
+    type: 'line',
+    data: {
+      datasets: [
+        { label: 'Flow (m³/s)', data: pts.map(p => ({ x: p.t.getTime(), y: p.v })) }
+      ]
+    },
+    options: {
+      animation: false,
+      parsing: false,
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom' },
+        decimation: { enabled: true, algorithm: 'min-max' }
+      },
+      interaction: { intersect: false, mode: 'nearest' },
+      scales: {
+        x: {
+          type: 'time',
+          min: xMin,
+          max: xMax,
+          time: { unit: days <= 2 ? 'hour' : 'day' }
+        },
+        y: { title: { display: true, text: 'm³/s' } }
       }
     }
   });
 
   setActive('flowRanges', days);
 }
-
 
 
 
