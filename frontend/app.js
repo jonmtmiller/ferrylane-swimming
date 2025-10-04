@@ -133,7 +133,7 @@ console.info('[temps]',
   titleEl.textContent = `Temperatures (last ${days} days${source === 'hourly' ? ' • hourly data' : ''})`;
 
   // 5) Render chart
-  tempChart?.destroy();
+  /*tempChart?.destroy();
   tempChart = new Chart(document.getElementById('tempChart'), {
     type: 'line',
     data: {
@@ -151,7 +151,38 @@ console.info('[temps]',
         y: { title: { display: true, text: '°C' } }
       }
     }
-  });
+  });*/
+
+  // after you have `pts`
+const xMin = pts[0].t.getTime();
+const xMax = pts[pts.length - 1].t.getTime();
+
+tempChart?.destroy();
+tempChart = new Chart(document.getElementById('tempChart'), {
+  type: 'line',
+  data: {
+    datasets: [
+      // NOTE: use getTime() for x
+      { label: 'River °C', data: pts.map(p => ({ x: p.t.getTime(), y: p.river })) },
+      { label: 'Air °C',   data: pts.filter(p => p.air != null).map(p => ({ x: p.t.getTime(), y: p.air })) },
+    ]
+  },
+  options: {
+    animation: false, parsing: false, responsive: true,
+    plugins: { legend: { position: 'bottom' }, decimation: { enabled: true, algorithm: 'min-max' } },
+    interaction: { intersect: false, mode: 'nearest' },
+    scales: {
+      x: {
+        type: 'time',
+        min: xMin,               // <-- explicitly set window
+        max: xMax,
+        time: { unit: days <= 2 ? 'hour' : 'day' }
+      },
+      y: { title: { display: true, text: '°C' } }
+    }
+  }
+});
+
 
   setActive('tempRanges', days);
 }
