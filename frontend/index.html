@@ -21,6 +21,17 @@
       <div class="card"><h2>Flow rate (Maidenhead)</h2><div class="big" id="flowNow">–</div><div class="sub" id="flowUpdated">—</div></div>
       <div class="card" id="sewageCard"><h2>Sewage status (Wargrave)</h2><div class="big" id="edmStatus">–</div><div class="sub" id="edmDetail">—</div></div>
       <div class="card"><h2>Weather (next 24h)</h2><div class="big" id="wxNow">–</div><div class="sub" id="wxDetail">—</div></div>
+      <div class="card">
+        <h3>Forecast (Wargrave)</h3>
+      
+        <div id="wx-current" class="wx-current"></div>
+      
+        <div class="wx-daily" id="wx-daily" aria-label="7-day forecast"></div>
+      
+        <h4 style="margin-top:12px">Next 24 hours</h4>
+        <div class="wx-hourly" id="wx-hourly" aria-label="Hourly forecast (24h)"></div>
+      </div>
+
     </section>
     <section class="charts">
       <div class="chart-card">
