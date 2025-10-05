@@ -4,6 +4,20 @@ let tempChart, flowChart;
 const DAY = 24*60*60*1000;
 const daysAgoISO = (n) => new Date(Date.now() - n*DAY).toISOString();
 
+// Simple icon mapping for Met Office significantWeatherCode
+const metIcon = (code) => {
+  if (code == null) return "❓";
+  if ([0, 1].includes(code)) return "☀️";   // clear/sunny
+  if ([2, 3].includes(code)) return "⛅";   // partly/cloudy
+  if ([5, 6, 7].includes(code)) return "🌫️";
+  if ([8, 9, 10, 11, 12].includes(code)) return "🌧️"; // rain / showers
+  if ([14, 15].includes(code)) return "🌨️"; // snow
+  if ([30, 31].includes(code)) return "⛈️"; // thunder
+  return "❓";
+};
+const arrow = (deg=0)=>["↑","↗","→","↘","↓","↙","←","↖"][Math.round(((deg%360)+360)%360/45)%8];
+
+
 function setActive(groupId, days) {
   const g = document.getElementById(groupId);
   if (!g) return;
@@ -299,6 +313,8 @@ async function loadEDM() {
       : 'No recent event info';
   } catch(e){ console.error('EDM load failed', e); $('edmStatus').textContent='Unavailable'; $('edmDetail').textContent='Check later'; }
 }
+
+/*
 async function loadWeather() {
   const lat=51.5, lon=-0.87;
   const url=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation&current=temperature_2m&timezone=Europe%2FLondon`;
@@ -314,6 +330,63 @@ async function loadWeather() {
       return `${hh}: ${prec[i] ?? 0} mm`;
     }).join(' · ');
   } catch(e){ console.error('weather failed', e); }
+  */
+
+async function loadWeather(lat = 51.50144, lon = -0.870961) {
+  let data;
+  try {
+    const res = await fetch(`/api/metoffice?lat=${lat}&lon=${lon}`, { cache: "no-store" });
+    data = await res.json();
+  } catch (e) {
+    console.error("Met Office fetch failed", e);
+    return;
+  }
+  const hourly = data?.hourly?.features?.[0]?.properties?.timeSeries || [];
+  const daily  = data?.daily?.features?.[0]?.properties?.timeSeries || [];
+
+  // ----- Current (first future hourly step) -----
+  const now = Date.now();
+  const hNext = hourly.find(h => new Date(h.time).getTime() >= now) || hourly[0];
+  if (hNext) {
+    const curHtml = `
+      <div class="big">${metIcon(hNext.significantWeatherCode)} ${Math.round(hNext.screenTemperature)}°C</div>
+      <div class="muted">
+        Wind ${Math.round(hNext.windSpeed10m ?? 0)}${hNext.windGustSpeed10m?`/${Math.round(hNext.windGustSpeed10m)}`:""} mph ${arrow(hNext.windDirectionFrom10m ?? 0)}
+        · Precip ${(hNext.totalPrecipAmount ?? hNext.precipitationAmount ?? 0).toFixed(1)} mm
+      </div>`;
+    document.getElementById("wx-current").innerHTML = curHtml;
+  }
+
+  // ----- Daily (7d) -----
+  const dayName = (dt)=> new Date(dt).toLocaleDateString("en-GB",{weekday:"short"});
+  document.getElementById("wx-daily").innerHTML = daily.map(d => `
+    <div class="wx-day">
+      <div class="d">${dayName(d.time)}</div>
+      <div class="ico">${metIcon(d.significantWeatherCode)}</div>
+      <div class="row"><span>Rain</span><span>${((d.totalPrecipAmount ?? d.precipitationAmount ?? 0).toFixed(1))} mm</span></div>
+      <div class="row"><span>Wind</span><span>${Math.round(d.max10mWindGust ?? d.windGustSpeed10m ?? 0)} mph</span></div>
+    </div>
+  `).join("");
+
+  // ----- Hourly (next 24h) -----
+  const end = now + 24*60*60*1000;
+  const next24 = hourly.filter(h => {
+    const t = new Date(h.time).getTime();
+    return t >= now && t < end;
+  });
+  document.getElementById("wx-hourly").innerHTML = next24.map(h => `
+    <div class="wx-hour">
+      <div>${new Date(h.time).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</div>
+      <div class="ico">${metIcon(h.significantWeatherCode)}</div>
+      <div>
+        <span class="badge blue">${Math.round(h.probOfPrecipitation ?? h.precipitationProbability ?? 0)}%</span>
+        <span class="badge green">${((h.totalPrecipAmount ?? h.precipitationAmount ?? 0)).toFixed(1)} mm</span>
+      </div>
+      <div>${Math.round(h.windSpeed10m ?? 0)}${h.windGustSpeed10m?`/${Math.round(h.windGustSpeed10m)}`:""} mph ${arrow(h.windDirectionFrom10m ?? 0)}</div>
+    </div>
+  `).join("");
+}
+
 }
 
 
