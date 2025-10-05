@@ -37,6 +37,40 @@ function resolveDailyWxCode(d) {
   return null;
 }
 
+// Daily: pick whichever field the API provides
+function resolveDailyWxCode(d) {
+  const candidates = [
+    'significantWeatherCode', 'daySignificantWeatherCode',
+    'significantWeatherCodeDay', 'significantWeatherCodeMostLikely',
+    'weatherCode', 'wxCode'
+  ];
+  for (const k of candidates) if (d?.[k] != null) return d[k];
+  for (const [k, v] of Object.entries(d||{})) if (/significant.*code/i.test(k) && v != null) return v;
+  return null;
+}
+function resolveDailyPrecipMm(d) {
+  const mmKeys = [
+    'totalPrecipAmount', 'precipitationAmount', 'totalPrecipitationAmount',
+    'precipAmount', 'totalPrecipMm'
+  ];
+  for (const k of mmKeys) if (Number.isFinite(d?.[k])) return d[k];
+  return 0;
+}
+function resolveDailyWindMaxMph(d) {
+  const spdKeys = ['max10mWindSpeed','windSpeed10mMax','maxWindSpeed10m','windSpeedMax10m'];
+  for (const k of spdKeys) if (Number.isFinite(d?.[k])) return d[k];
+  // fallback to gust if that’s all we have
+  const g = resolveDailyGustMaxMph(d);
+  return Number.isFinite(g) ? g : 0;
+}
+function resolveDailyGustMaxMph(d) {
+  const gustKeys = ['max10mWindGust','windGustSpeed10mMax','maxWindGustSpeed10m','windGust10mMax'];
+  for (const k of gustKeys) if (Number.isFinite(d?.[k])) return d[k];
+  return undefined; // optional
+}
+const dayName = (dt)=> new Date(dt).toLocaleDateString("en-GB",{weekday:"short"});
+
+
 
 
 function setActive(groupId, days) {
@@ -379,16 +413,31 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
     document.getElementById("wx-current").innerHTML = curHtml;
   }
 
-  // ----- Daily (7d) -----
-  const dayName = (dt)=> new Date(dt).toLocaleDateString("en-GB",{weekday:"short"});
-  document.getElementById("wx-daily").innerHTML = daily.map(d => `
+// ----- Daily (7d) -----
+const startLocalMidnight = new Date();
+startLocalMidnight.setHours(0,0,0,0);
+
+// Keep only today → +6 days
+const dailyFromToday = (data?.daily?.features?.[0]?.properties?.timeSeries || [])
+  .filter(d => new Date(d.time).getTime() >= startLocalMidnight.getTime())
+  .slice(0, 7);
+
+document.getElementById("wx-daily").innerHTML = dailyFromToday.map(d => {
+  const code = resolveDailyWxCode(d);
+  const rain = resolveDailyPrecipMm(d);
+  const wind = resolveDailyWindMaxMph(d);
+  const gust = resolveDailyGustMaxMph(d);
+
+  return `
     <div class="wx-day">
       <div class="d">${dayName(d.time)}</div>
-      <div class="ico">${metIcon(resolveDailyWxCode(d))}</div>
-      <div class="row"><span>Rain</span><span>${((d.totalPrecipAmount ?? d.precipitationAmount ?? 0).toFixed(1))} mm</span></div>
-      <div class="row"><span>Wind</span><span>${Math.round(d.max10mWindGust ?? d.windGustSpeed10m ?? 0)} mph</span></div>
+      <div class="ico">${metIcon(code)}</div>
+      <div class="row"><span>Rain</span><span>${rain.toFixed(1)} mm</span></div>
+      <div class="row"><span>Wind</span><span>${Math.round(wind)}${gust?`/${Math.round(gust)}`:''} mph</span></div>
     </div>
-  `).join("");
+  `;
+}).join("");
+
 
   // ----- Hourly (next 24h) -----
   const end = now + 24*60*60*1000;
