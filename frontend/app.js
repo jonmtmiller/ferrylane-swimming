@@ -17,6 +17,27 @@ const metIcon = (code) => {
 };
 const arrow = (deg=0)=>["↑","↗","→","↘","↓","↙","←","↖"][Math.round(((deg%360)+360)%360/45)%8];
 
+// Try common daily code field names, then fall back to any key that looks like a sig. weather code.
+function resolveDailyWxCode(d) {
+  const candidates = [
+    'significantWeatherCode',        // some daily payloads use the same name as hourly
+    'daySignificantWeatherCode',     // daytime code
+    'significantWeatherCodeDay',     // alt naming
+    'significantWeatherCodeMostLikely', // some blends/summary variants
+    'weatherCode', 'wxCode'          // very rare alternates
+  ];
+  for (const k of candidates) {
+    const v = d?.[k];
+    if (v !== undefined && v !== null) return v;
+  }
+  // Fallback: pick any property that looks like a “significant…code”
+  for (const [k, v] of Object.entries(d || {})) {
+    if (/significant.*code/i.test(k) && v !== undefined && v !== null) return v;
+  }
+  return null;
+}
+
+
 
 function setActive(groupId, days) {
   const g = document.getElementById(groupId);
@@ -363,7 +384,7 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
   document.getElementById("wx-daily").innerHTML = daily.map(d => `
     <div class="wx-day">
       <div class="d">${dayName(d.time)}</div>
-      <div class="ico">${metIcon(d.significantWeatherCode)}</div>
+      <div class="ico">${metIcon(resolveDailyWxCode(d))}</div>
       <div class="row"><span>Rain</span><span>${((d.totalPrecipAmount ?? d.precipitationAmount ?? 0).toFixed(1))} mm</span></div>
       <div class="row"><span>Wind</span><span>${Math.round(d.max10mWindGust ?? d.windGustSpeed10m ?? 0)} mph</span></div>
     </div>
