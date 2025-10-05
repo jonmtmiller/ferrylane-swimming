@@ -37,7 +37,8 @@ function resolveDailyWxCode(d) {
   return null;
 }
 
-// Daily: pick whichever field the API provides
+// Daily: pick whichever field the API provides - JM: this was created after the one above, but keeping the one that has more info
+/*
 function resolveDailyWxCode(d) {
   const candidates = [
     'significantWeatherCode', 'daySignificantWeatherCode',
@@ -48,6 +49,8 @@ function resolveDailyWxCode(d) {
   for (const [k, v] of Object.entries(d||{})) if (/significant.*code/i.test(k) && v != null) return v;
   return null;
 }
+*/
+
 function resolveDailyPrecipMm(d) {
   const mmKeys = [
     'totalPrecipAmount', 'precipitationAmount', 'totalPrecipitationAmount',
