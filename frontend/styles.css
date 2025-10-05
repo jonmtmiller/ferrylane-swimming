@@ -27,3 +27,27 @@ a { color: var(--accent); }
 }
 .range-buttons .btn:hover { background: rgba(255,255,255,.08); }
 .range-buttons .btn.active { background: var(--accent); border-color: var(--accent); color: #05121d; }
+
+.wx-current { display:flex; gap:12px; align-items:center; margin: 4px 0 10px; }
+.wx-current .big { font-size: 28px; font-weight: 700; }
+.wx-current .muted { opacity:.8; }
+
+.wx-daily { display:grid; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap:8px; }
+.wx-day {
+  border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:10px;
+  display:flex; flex-direction:column; gap:6px; background:rgba(255,255,255,.04);
+}
+.wx-day .d { font-weight:700; }
+.wx-day .row { display:flex; justify-content:space-between; font-size:12px; }
+.wx-day .ico { font-size:22px; line-height:1; }
+
+.wx-hourly { display:flex; gap:6px; overflow:auto; padding-bottom:2px; }
+.wx-hour {
+  min-width:76px; border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:8px;
+  display:flex; flex-direction:column; gap:4px; background:rgba(255,255,255,.04);
+  text-align:center; font-size:12px;
+}
+.wx-hour .ico { font-size:18px; line-height:1; }
+.badge { padding:2px 6px; border-radius:999px; border:1px solid rgba(255,255,255,.12); font-size:11px; }
+.badge.blue { background:#0b62ff22; border-color:#0b62ff66; }
+.badge.green{ background:#00b36b22; border-color:#00b36b66; }
