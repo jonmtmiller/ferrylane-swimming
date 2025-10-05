@@ -330,6 +330,7 @@ async function loadWeather() {
       return `${hh}: ${prec[i] ?? 0} mm`;
     }).join(' · ');
   } catch(e){ console.error('weather failed', e); }
+  }
   */
 
 async function loadWeather(lat = 51.50144, lon = -0.870961) {
@@ -385,8 +386,6 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
       <div>${Math.round(h.windSpeed10m ?? 0)}${h.windGustSpeed10m?`/${Math.round(h.windGustSpeed10m)}`:""} mph ${arrow(h.windDirectionFrom10m ?? 0)}</div>
     </div>
   `).join("");
-}
-
 }
 
 
