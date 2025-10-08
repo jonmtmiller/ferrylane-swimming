@@ -4,18 +4,43 @@ let tempChart, flowChart;
 const DAY = 24*60*60*1000;
 const daysAgoISO = (n) => new Date(Date.now() - n*DAY).toISOString();
 
-// Simple icon mapping for Met Office significantWeatherCode
+// Met Office icon mapping (keep your version if you already have one)
 const metIcon = (code) => {
   if (code == null) return "❓";
-  if ([0, 1].includes(code)) return "☀️";   // clear/sunny
-  if ([2, 3].includes(code)) return "⛅";   // partly/cloudy
+  if ([0, 1].includes(code)) return "☀️";
+  if ([2, 3].includes(code)) return "⛅";
   if ([5, 6, 7].includes(code)) return "🌫️";
-  if ([8, 9, 10, 11, 12].includes(code)) return "🌧️"; // rain / showers
-  if ([14, 15].includes(code)) return "🌨️"; // snow
-  if ([30, 31].includes(code)) return "⛈️"; // thunder
+  if ([8, 9,10,11,12].includes(code)) return "🌧️";
+  if ([14,15].includes(code)) return "🌨️";
+  if ([30,31].includes(code)) return "⛈️";
   return "❓";
 };
 const arrow = (deg=0)=>["↑","↗","→","↘","↓","↙","←","↖"][Math.round(((deg%360)+360)%360/45)%8];
+
+const MS_TO_MPH = 2.23693629;
+const toMph = (v) => v==null ? null : v * MS_TO_MPH; // keep decimals; round on print
+
+const localDayKey = (date) =>
+  new Date(date).toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+
+// Aggregate hourly into local-day buckets (mm total + max winds)
+function bucketHourly(hourly) {
+  const map = new Map(); // key: 'YYYY-MM-DD' -> { mm, maxWind, maxGust }
+  for (const h of hourly) {
+    const t = new Date(h.time);
+    const k = localDayKey(t);
+    const cur = map.get(k) || { mm:0, maxWind:0, maxGust:0, hasPrecip:false };
+    cur.mm += Number(h.totalPrecipAmount || 0);
+    cur.maxWind = Math.max(cur.maxWind, Number(h.windSpeed10m || 0));
+    cur.maxGust = Math.max(cur.maxGust, Number(h.windGustSpeed10m || 0), Number(h.max10mWindGust || 0));
+    if (h.totalPrecipAmount != null) cur.hasPrecip = true;
+    map.set(k, cur);
+  }
+  return map;
+}
+
+
+
 
 // Try common daily code field names, then fall back to any key that looks like a sig. weather code.
 function resolveDailyWxCode(d) {
@@ -372,24 +397,6 @@ async function loadEDM() {
   } catch(e){ console.error('EDM load failed', e); $('edmStatus').textContent='Unavailable'; $('edmDetail').textContent='Check later'; }
 }
 
-/*
-async function loadWeather() {
-  const lat=51.5, lon=-0.87;
-  const url=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation&current=temperature_2m&timezone=Europe%2FLondon`;
-  try {
-    const wx = await (await fetch(url)).json();
-    const cur = wx.current || {};
-    const t = cur.temperature_2m;
-    $('wxNow').textContent = (t!=null) ? `${(t.toFixed?t.toFixed(1):t)}°C` : '—';
-    const hours = wx.hourly?.time?.slice(0,6)||[];
-    const prec = wx.hourly?.precipitation?.slice(0,6)||[];
-    $('wxDetail').textContent = hours.map((t,i)=>{
-      const hh = new Date(t).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-      return `${hh}: ${prec[i] ?? 0} mm`;
-    }).join(' · ');
-  } catch(e){ console.error('weather failed', e); }
-  }
-  */
 
 async function loadWeather(lat = 51.50144, lon = -0.870961) {
   let data;
@@ -400,6 +407,7 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
     console.error("Met Office fetch failed", e);
     return;
   }
+
   const hourly = data?.hourly?.features?.[0]?.properties?.timeSeries || [];
   const daily  = data?.daily?.features?.[0]?.properties?.timeSeries || [];
 
@@ -407,40 +415,57 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
   const now = Date.now();
   const hNext = hourly.find(h => new Date(h.time).getTime() >= now) || hourly[0];
   if (hNext) {
+    const windMph = toMph(hNext.windSpeed10m ?? 0);
+    const gustMph = toMph(hNext.windGustSpeed10m ?? null);
     const curHtml = `
       <div class="big">${metIcon(hNext.significantWeatherCode)} ${Math.round(hNext.screenTemperature)}°C</div>
       <div class="muted">
-        Wind ${Math.round(hNext.windSpeed10m ?? 0)}${hNext.windGustSpeed10m?`/${Math.round(hNext.windGustSpeed10m)}`:""} mph ${arrow(hNext.windDirectionFrom10m ?? 0)}
-        · Precip ${(hNext.totalPrecipAmount ?? hNext.precipitationAmount ?? 0).toFixed(1)} mm
+        Wind ${Math.round(windMph ?? 0)}${gustMph?`/${Math.round(gustMph)}`:""} mph ${arrow(hNext.windDirectionFrom10m ?? 0)}
+        · Precip ${(hNext.totalPrecipAmount ?? 0).toFixed(1)} mm
       </div>`;
     document.getElementById("wx-current").innerHTML = curHtml;
   }
 
-// ----- Daily (7d) -----
-const startLocalMidnight = new Date();
-startLocalMidnight.setHours(0,0,0,0);
+  // Precompute hourly aggregates by local day
+  const buckets = bucketHourly(hourly);
 
-// Keep only today → +6 days
-const dailyFromToday = (data?.daily?.features?.[0]?.properties?.timeSeries || [])
-  .filter(d => new Date(d.time).getTime() >= startLocalMidnight.getTime())
-  .slice(0, 7);
+  // ----- Daily (start today, 6 days) -----
+  const startLocalMidnight = new Date(); startLocalMidnight.setHours(0,0,0,0);
+  const dailyFromToday = daily
+    .filter(d => new Date(d.time).getTime() >= startLocalMidnight.getTime())
+    .slice(0, 6);
 
-document.getElementById("wx-daily").innerHTML = dailyFromToday.map(d => {
-  const code = resolveDailyWxCode(d);
-  const rain = resolveDailyPrecipMm(d);
-  const wind = resolveDailyWindMaxMph(d);
-  const gust = resolveDailyGustMaxMph(d);
+  const dayName = (dt)=> new Date(dt).toLocaleDateString("en-GB",{weekday:"short"});
 
-  return `
-    <div class="wx-day">
-      <div class="d">${dayName(d.time)}</div>
-      <div class="ico">${metIcon(code)}</div>
-      <div class="row"><span>Rain</span><span>${rain.toFixed(1)} mm</span></div>
-      <div class="row"><span>Wind</span><span>${Math.round(wind)}${gust?`/${Math.round(gust)}`:''} mph</span></div>
-    </div>
-  `;
-}).join("");
+  document.getElementById("wx-daily").innerHTML = dailyFromToday.map(d => {
+    // Icon: use day code (fallback to night code if needed)
+    const code = d.daySignificantWeatherCode ?? d.significantWeatherCode ?? d.nightSignificantWeatherCode ?? null;
 
+    // Rain: prefer summed mm from hourly (if we have that day in range), otherwise show probability
+    const k = localDayKey(d.time);
+    const agg = buckets.get(k);
+    const mm = agg?.hasPrecip ? agg.mm : null; // only show if we truly had hourly for that day
+    const prob = d.dayProbabilityOfPrecipitation ?? d.dayProbabilityOfRain ?? null;
+
+    // Wind/Gust: prefer hourly max; otherwise use midday values
+    const windMps = agg ? agg.maxWind : (d.midday10MWindSpeed ?? d.midnight10MWindSpeed ?? 0);
+    const gustMps = agg ? agg.maxGust : (d.midday10MWindGust ?? d.midnight10MWindGust ?? null);
+
+    const windMph = toMph(windMps);
+    const gustMph = toMph(gustMps);
+
+    return `
+      <div class="wx-day">
+        <div class="d">${dayName(d.time)}</div>
+        <div class="ico">${metIcon(code)}</div>
+        ${mm != null
+          ? `<div class="row"><span>Rain</span><span>${mm.toFixed(1)} mm</span></div>`
+          : `<div class="row"><span>Prob</span><span>${prob != null ? Math.round(prob) : 0}%</span></div>`
+        }
+        <div class="row"><span>Wind</span><span>${Math.round(windMph ?? 0)}${gustMph?`/${Math.round(gustMph)}`:""} mph</span></div>
+      </div>
+    `;
+  }).join("");
 
   // ----- Hourly (next 24h) -----
   const end = now + 24*60*60*1000;
@@ -448,22 +473,40 @@ document.getElementById("wx-daily").innerHTML = dailyFromToday.map(d => {
     const t = new Date(h.time).getTime();
     return t >= now && t < end;
   });
-  document.getElementById("wx-hourly").innerHTML = next24.map(h => `
-    <div class="wx-hour">
-      <div>${new Date(h.time).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</div>
-      <div class="ico">${metIcon(h.significantWeatherCode)}</div>
-      <div>
-        <span class="badge blue">${Math.round(h.probOfPrecipitation ?? h.precipitationProbability ?? 0)}%</span>
-        <span class="badge green">${((h.totalPrecipAmount ?? h.precipitationAmount ?? 0)).toFixed(1)} mm</span>
+  document.getElementById("wx-hourly").innerHTML = next24.map(h => {
+    const ws = toMph(h.windSpeed10m ?? 0);
+    const wg = toMph(h.windGustSpeed10m ?? null);
+    return `
+      <div class="wx-hour">
+        <div>${new Date(h.time).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</div>
+        <div class="ico">${metIcon(h.significantWeatherCode)}</div>
+        <div>
+          <span class="badge blue">${Math.round(h.probOfPrecipitation ?? 0)}%</span>
+          <span class="badge green">${(h.totalPrecipAmount ?? 0).toFixed(1)} mm</span>
+        </div>
+        <div>${Math.round(ws)}${wg?`/${Math.round(wg)}`:""} mph ${arrow(h.windDirectionFrom10m ?? 0)}</div>
       </div>
-      <div>${Math.round(h.windSpeed10m ?? 0)}${h.windGustSpeed10m?`/${Math.round(h.windGustSpeed10m)}`:""} mph ${arrow(h.windDirectionFrom10m ?? 0)}</div>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 }
 
 
 
+
 window.addEventListener('DOMContentLoaded', () => {
+  // collapse by default
+  const card = document.getElementById('forecastCard');
+  const toggle = document.getElementById('wx-toggle');
+  if (card && toggle) {
+    card.classList.add('collapsed');
+    toggle.addEventListener('click', () => {
+      const isCollapsed = card.classList.toggle('collapsed');
+      toggle.setAttribute('aria-expanded', String(!isCollapsed));
+      toggle.textContent = isCollapsed ? 'Show forecast ▾' : 'Hide forecast ▴';
+    });
+  }
+  
+  
   // defaults that match the 'active' buttons
   loadTemps(10);
   loadFlow(14);
