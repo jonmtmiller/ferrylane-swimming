@@ -28,6 +28,11 @@ a { color: var(--accent); }
 .range-buttons .btn:hover { background: rgba(255,255,255,.08); }
 .range-buttons .btn.active { background: var(--accent); border-color: var(--accent); color: #05121d; }
 
+
+.flex-between { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.btn.btn-small { font-size:12px; padding:4px 8px; }
+#forecastCard.collapsed #wx-collapsible { display:none; }
+
 .wx-current { display:flex; gap:12px; align-items:center; margin: 4px 0 10px; }
 .wx-current .big { font-size: 28px; font-weight: 700; }
 .wx-current .muted { opacity:.8; }
