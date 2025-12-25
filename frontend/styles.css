@@ -84,3 +84,5 @@ a { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   #snow-canvas { display: none; }
 }
+
+.christmas .card { box-shadow: 0 0 0 2px rgba(198,40,40,.25), 0 0 20px rgba(11,143,47,.25) inset; }
