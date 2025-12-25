@@ -88,21 +88,27 @@ a { color: var(--accent); }
 .christmas .card { box-shadow: 0 0 0 2px rgba(198,40,40,.25), 0 0 20px rgba(11,143,47,.25) inset; }
 
 
-/* allow hat positioning */
-.brand { position: relative; display: inline-block; }
 
-/* the hat image itself */
-.hat {
+/* Let the hat anchor to the logo */
+.logo.brand { position: relative; display: inline-block; }
+
+/* Hat position/visibility */
+#santa-hat.hat {
   position: absolute;
-  width: clamp(28px, 20%, 52px);
-  aspect-ratio: 1.4 / 1;      /* wider than tall */
-  left: -0.15em;
-  top: -0.65em;
+  width: clamp(28px, 20%, 52px); /* adjust size if needed */
+  aspect-ratio: 1.4 / 1;
+  left: -0.15em;   /* nudge horizontally */
+  top: -0.65em;    /* nudge vertically */
   transform: rotate(-18deg);
   pointer-events: none;
   z-index: 2;
   filter: drop-shadow(0 2px 2px rgba(0,0,0,.25));
+  display: none;   /* hidden by default */
 }
 
-/* hide the hat when christmas mode is off */
-:not(.christmas) #santa-hat { display: none; }
+/* Show only when Christmas mode is active on <html> */
+.christmas #santa-hat { display: block; }
+
+/* Optional fine-tunes for very large/small headings */
+/* .christmas #santa-hat { left: -0.25em; top: -0.8em; }   bigger logo */
+/* .christmas #santa-hat { left: -0.10em; top: -0.50em; }  smaller logo */
