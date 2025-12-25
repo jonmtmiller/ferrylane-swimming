@@ -626,3 +626,63 @@ window.addEventListener('DOMContentLoaded', () => {
     setMode(enable);
   });
 })();
+
+
+function ensureSantaHat() {
+  const brand = document.querySelector('.brand');
+  if (!brand) return;
+
+  // already added?
+  let hat = document.getElementById('santa-hat');
+  if (!hat) {
+    hat = document.createElement('img');
+    hat.id = 'santa-hat';
+    hat.className = 'hat';
+    hat.alt = '';
+    hat.decoding = 'async';
+    // Inline SVG → data URL (utf8-encoded)
+    const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
+  <defs>
+    <linearGradient id="r" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#e53935"/>
+      <stop offset="1" stop-color="#b71c1c"/>
+    </linearGradient>
+  </defs>
+  <!-- red cap -->
+  <path d="M12 82 C 18 35, 70 8, 128 20 C 85 35, 66 55, 52 82 Z" fill="url(#r)"/>
+  <!-- brim -->
+  <rect x="8" y="78" width="124" height="18" rx="9" ry="9" fill="#ffffff"/>
+  <!-- bobble -->
+  <circle cx="120" cy="26" r="12" fill="#ffffff"/>
+</svg>`;
+    hat.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    brand.appendChild(hat);
+  }
+}
+
+// In your existing Christmas mode code, call ensureSantaHat() on enable,
+// and optionally remove it on disable:
+function setMode(on){
+  const root = document.documentElement;
+  const btn  = document.getElementById('xmas-toggle');
+  const cnv  = document.getElementById('snow-canvas');
+
+  if (on) {
+    root.classList.add('christmas');
+    btn.hidden = false;
+    btn.textContent = '🎄 Christmas mode: on';
+    // ... your startSnow(canvas) call ...
+    try { localStorage.setItem('xmasMode', 'on'); } catch {}
+    ensureSantaHat(); // <- add hat when turning on
+  } else {
+    root.classList.remove('christmas');
+    btn.hidden = false;
+    btn.textContent = '🎄 Christmas mode: off';
+    // ... your stopSnow() code ...
+    try { localStorage.setItem('xmasMode', 'off'); } catch {}
+    // Optional: remove the element (or leave it hidden by CSS)
+    // const hat = document.getElementById('santa-hat'); if (hat) hat.remove();
+  }
+}
+
