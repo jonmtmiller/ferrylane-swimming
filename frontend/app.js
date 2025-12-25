@@ -524,3 +524,91 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+(function christmasMode(){
+  const TZ = "Europe/London";
+  const now = new Date();
+  const nowUK = new Date(now.toLocaleString("en-GB", { timeZone: TZ }));
+  const month = nowUK.getMonth() + 1;    // 1..12
+  const day   = nowUK.getDate();         // 1..31
+
+  const wants = localStorage.getItem("xmasMode");
+  const shouldAuto = (month === 12 && day >= 25) || (month === 12 && day <= 31);
+  const enable = (wants === "on") || (wants === null && shouldAuto);
+
+  const root = document.documentElement;
+  const btn  = document.getElementById("xmas-toggle");
+  const canvas = document.getElementById("snow-canvas");
+  if (!btn || !canvas) return;
+
+  let stopSnow = () => {};
+
+  function setMode(on) {
+    if (on) {
+      root.classList.add("christmas");
+      btn.hidden = false;
+      btn.textContent = "🎄 Christmas mode: on";
+      startSnow(canvas);
+      localStorage.setItem("xmasMode", "on");
+    } else {
+      root.classList.remove("christmas");
+      btn.hidden = false;
+      btn.textContent = "🎄 Christmas mode: off";
+      stopSnow();
+      const ctx = canvas.getContext("2d"); ctx && ctx.clearRect(0,0,canvas.width,canvas.height);
+      localStorage.setItem("xmasMode", "off");
+    }
+  }
+
+  btn.addEventListener("click", () => {
+    const isOn = root.classList.contains("christmas");
+    setMode(!isOn);
+  });
+
+  // Only auto-enable if user hasn't set a preference yet
+  setMode(enable);
+
+  // ---- Snow engine (lightweight, ~1–2% CPU) ----
+  function startSnow(cnv) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { stopSnow = () => {}; return; }
+    const ctx = cnv.getContext("2d");
+    let w, h, flakes = [], rafId;
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    function resize() { w = cnv.width  = Math.floor(window.innerWidth  * DPR);
+                        h = cnv.height = Math.floor(window.innerHeight * DPR); }
+    resize(); window.addEventListener("resize", resize);
+
+    const N = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60; // scale with screen
+    for (let i=0;i<N;i++) flakes.push(makeFlake());
+
+    function makeFlake(){
+      return {
+        x: Math.random()*w,
+        y: Math.random()*h,
+        r: 0.7 + Math.random()*2.2,         // radius
+        s: 0.4 + Math.random()*0.9,         // speed
+        a: Math.random()*Math.PI*2,         // angle
+        drift: 0.3 + Math.random()*0.7,     // horizontal sway
+        o: 0.5 + Math.random()*0.5          // opacity
+      };
+    }
+
+    function tick(){
+      ctx.clearRect(0,0,w,h);
+      ctx.fillStyle = "#fff";
+      ctx.globalCompositeOperation = "lighter";
+      for (const f of flakes){
+        f.y += f.s * DPR;
+        f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
+        if (f.y > h + 5) { f.y = -10; f.x = Math.random()*w; }
+        if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
+
+        ctx.globalAlpha = f.o;
+        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI*2); ctx.fill();
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+    tick();
+
+    stopSnow = () => { cancelAnimationFrame(rafId); window.removeEventListener("resize", resize); };
+  }
+})();
