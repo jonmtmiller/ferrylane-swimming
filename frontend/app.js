@@ -524,91 +524,105 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+
+// --- Christmas mode (Dec 25–31, Europe/London) ---
 (function christmasMode(){
   const TZ = "Europe/London";
-  const now = new Date();
-  const nowUK = new Date(now.toLocaleString("en-GB", { timeZone: TZ }));
-  const month = nowUK.getMonth() + 1;    // 1..12
-  const day   = nowUK.getDate();         // 1..31
 
-  const wants = localStorage.getItem("xmasMode");
-  const shouldAuto = (month === 12 && day >= 25) || (month === 12 && day <= 31);
-  const enable = (wants === "on") || (wants === null && shouldAuto);
-
-  const root = document.documentElement;
-  const btn  = document.getElementById("xmas-toggle");
-  const canvas = document.getElementById("snow-canvas");
-  if (!btn || !canvas) return;
-
-  let stopSnow = () => {};
-
-  function setMode(on) {
-    if (on) {
-      root.classList.add("christmas");
-      btn.hidden = false;
-      btn.textContent = "🎄 Christmas mode: on";
-      startSnow(canvas);
-      localStorage.setItem("xmasMode", "on");
-    } else {
-      root.classList.remove("christmas");
-      btn.hidden = false;
-      btn.textContent = "🎄 Christmas mode: off";
-      stopSnow();
-      const ctx = canvas.getContext("2d"); ctx && ctx.clearRect(0,0,canvas.width,canvas.height);
-      localStorage.setItem("xmasMode", "off");
-    }
+  function isXmasWindow(dUtc = new Date()){
+    const uk = new Date(dUtc.toLocaleString("en-GB", { timeZone: TZ }));
+    const m = uk.getMonth() + 1; // 1..12
+    const d = uk.getDate();      // 1..31
+    return (m === 12 && d >= 25 && d <= 31); // exact window
   }
 
-  btn.addEventListener("click", () => {
-    const isOn = root.classList.contains("christmas");
-    setMode(!isOn);
-  });
+  // Ensure the DOM exists before we touch elements
+  window.addEventListener('DOMContentLoaded', () => {
+    // Make sure elements exist (create if missing so we never bail)
+    let btn = document.getElementById('xmas-toggle');
+    let cnv = document.getElementById('snow-canvas');
 
-  // Only auto-enable if user hasn't set a preference yet
-  setMode(enable);
-
-  // ---- Snow engine (lightweight, ~1–2% CPU) ----
-  function startSnow(cnv) {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { stopSnow = () => {}; return; }
-    const ctx = cnv.getContext("2d");
-    let w, h, flakes = [], rafId;
-    const DPR = Math.min(window.devicePixelRatio || 1, 2);
-    function resize() { w = cnv.width  = Math.floor(window.innerWidth  * DPR);
-                        h = cnv.height = Math.floor(window.innerHeight * DPR); }
-    resize(); window.addEventListener("resize", resize);
-
-    const N = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60; // scale with screen
-    for (let i=0;i<N;i++) flakes.push(makeFlake());
-
-    function makeFlake(){
-      return {
-        x: Math.random()*w,
-        y: Math.random()*h,
-        r: 0.7 + Math.random()*2.2,         // radius
-        s: 0.4 + Math.random()*0.9,         // speed
-        a: Math.random()*Math.PI*2,         // angle
-        drift: 0.3 + Math.random()*0.7,     // horizontal sway
-        o: 0.5 + Math.random()*0.5          // opacity
-      };
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'xmas-toggle';
+      btn.className = 'btn btn-small xmas-toggle';
+      btn.title = 'Toggle Christmas mode';
+      document.body.appendChild(btn);
+    }
+    if (!cnv) {
+      cnv = document.createElement('canvas');
+      cnv.id = 'snow-canvas';
+      cnv.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(cnv);
     }
 
-    function tick(){
-      ctx.clearRect(0,0,w,h);
-      ctx.fillStyle = "#fff";
-      ctx.globalCompositeOperation = "lighter";
-      for (const f of flakes){
-        f.y += f.s * DPR;
-        f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
-        if (f.y > h + 5) { f.y = -10; f.x = Math.random()*w; }
-        if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
+    const root = document.documentElement;
+    let stopSnow = () => {};
 
-        ctx.globalAlpha = f.o;
-        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI*2); ctx.fill();
+    function startSnow(canvas) {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { stopSnow = () => {}; return; }
+      const ctx = canvas.getContext("2d");
+      let w, h, flakes = [], rafId;
+      const DPR = Math.min(window.devicePixelRatio || 1, 2);
+      function resize(){ w = canvas.width = Math.floor(window.innerWidth * DPR);
+                         h = canvas.height= Math.floor(window.innerHeight* DPR); }
+      resize(); window.addEventListener("resize", resize);
+
+      const N = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60;
+      for (let i=0;i<N;i++) flakes.push({
+        x: Math.random()*w, y: Math.random()*h,
+        r: 0.7+Math.random()*2.2, s: 0.4+Math.random()*0.9,
+        a: Math.random()*Math.PI*2, drift: 0.3+Math.random()*0.7, o: 0.5+Math.random()*0.5
+      });
+
+      function tick(){
+        ctx.clearRect(0,0,w,h);
+        ctx.fillStyle = "#fff";
+        ctx.globalCompositeOperation = "lighter";
+        for (const f of flakes){
+          f.y += f.s * DPR;
+          f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
+          if (f.y > h + 5) { f.y = -10; f.x = Math.random()*w; }
+          if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
+          ctx.globalAlpha = f.o;
+          ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI*2); ctx.fill();
+        }
+        rafId = requestAnimationFrame(tick);
       }
-      rafId = requestAnimationFrame(tick);
-    }
-    tick();
+      tick();
 
-    stopSnow = () => { cancelAnimationFrame(rafId); window.removeEventListener("resize", resize); };
-  }
+      stopSnow = () => { cancelAnimationFrame(rafId); window.removeEventListener("resize", resize); };
+    }
+
+    function setMode(on){
+      if (on) {
+        root.classList.add('christmas');
+        btn.hidden = false;
+        btn.textContent = '🎄 Christmas mode: on';
+        startSnow(cnv);
+        try { localStorage.setItem('xmasMode', 'on'); } catch {}
+      } else {
+        root.classList.remove('christmas');
+        btn.hidden = false;
+        btn.textContent = '🎄 Christmas mode: off';
+        stopSnow();
+        const ctx = cnv.getContext('2d'); if (ctx) ctx.clearRect(0,0,cnv.width,cnv.height);
+        try { localStorage.setItem('xmasMode', 'off'); } catch {}
+      }
+    }
+
+    // Decide initial state
+    let wants = null;
+    try { wants = localStorage.getItem('xmasMode'); } catch {}
+    const enable = (wants === 'on') || (wants == null && isXmasWindow());
+
+    // Wire the toggle
+    btn.addEventListener('click', () => {
+      const isOn = root.classList.contains('christmas');
+      setMode(!isOn);
+    });
+
+    // Apply initial
+    setMode(enable);
+  });
 })();
