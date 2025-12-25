@@ -86,3 +86,44 @@ a { color: var(--accent); }
 }
 
 .christmas .card { box-shadow: 0 0 0 2px rgba(198,40,40,.25), 0 0 20px rgba(11,143,47,.25) inset; }
+
+/* Let the hat anchor to the logo */
+.brand { position: relative; display: inline-block; }
+
+/* Show the hat only in Christmas mode */
+.christmas .brand::after {
+  content: "";
+  position: absolute;
+  /* size/position: tweak if needed */
+  width: clamp(28px, 20%, 52px);
+  aspect-ratio: 1.4 / 1;         /* hat is wider than tall */
+  left: -0.15em;
+  top: -0.65em;
+  transform: rotate(-18deg);
+  pointer-events: none;
+  z-index: 2;
+
+  /* simple hat SVG (red cap + white brim + bobble) */
+  background: url('data:image/svg+xml;utf8,\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 140 100\">\
+  <defs>\
+    <linearGradient id=\"r\" x1=\"0\" x2=\"0\" y1=\"0\" y2=\"1\">\
+      <stop offset=\"0\" stop-color=\"#e53935\"/>\
+      <stop offset=\"1\" stop-color=\"#b71c1c\"/>\
+    </linearGradient>\
+  </defs>\
+  <!-- red cap -->\
+  <path d=\"M12 82 C 18 35, 70 8, 128 20 C 85 35, 66 55, 52 82 Z\" fill=\"url(#r)\"/>\
+  <!-- brim -->\
+  <rect x=\"8\" y=\"78\" width=\"124\" height=\"18\" rx=\"9\" ry=\"9\" fill=\"#ffffff\"/>\
+  <!-- bobble -->\
+  <circle cx=\"120\" cy=\"26\" r=\"12\" fill=\"#ffffff\"/>\
+</svg>') center / contain no-repeat;
+
+  /* subtle lift */
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,.25));
+}
+
+/* If your logo text is big/small, these helpers may fit better; uncomment one: */
+/* .christmas .brand::after { left: -0.25em; top: -0.8em; }  */  /* bigger titles */
+/* .christmas .brand::after { left: -0.1em;  top: -0.5em; }  */  /* smaller titles */
