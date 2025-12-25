@@ -56,3 +56,31 @@ a { color: var(--accent); }
 .badge { padding:2px 6px; border-radius:999px; border:1px solid rgba(255,255,255,.12); font-size:11px; }
 .badge.blue { background:#0b62ff22; border-color:#0b62ff66; }
 .badge.green{ background:#00b36b22; border-color:#00b36b66; }
+
+/* Christmas accent palette */
+:root.christmas {
+  --accent: #0b8f2f;            /* holly green */
+  --accent-2: #c62828;          /* berry red */
+}
+.christmas .card h3,
+.christmas .btn, .christmas .badge.blue { border-color: var(--accent); }
+.christmas .btn { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.christmas .badge.green { border-color: var(--accent); }
+
+ /* Snow canvas sits on top but doesn't block clicks */
+#snow-canvas {
+  position: fixed; inset: 0; pointer-events: none;
+  z-index: 9999; opacity: .9;
+}
+
+/* Toggle placement */
+.xmas-toggle {
+  position: fixed; right: 12px; bottom: 12px; z-index: 10000;
+  background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.2);
+  backdrop-filter: blur(6px);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  #snow-canvas { display: none; }
+}
