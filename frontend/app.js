@@ -533,8 +533,10 @@ window.addEventListener('DOMContentLoaded', () => {
     const uk = new Date(dUtc.toLocaleString("en-GB", { timeZone: TZ }));
     const m = uk.getMonth() + 1; // 1..12
     const d = uk.getDate();      // 1..31
+    //JM: The numbers above were coming out as NaN in browser console
     //return (m === 12 && d >= 25 && d <= 31); // exact window
-    return (m === 12); // exact window
+    //return (m === 12); // exact window
+    return true; // exact window
   }
 
   // Ensure the DOM exists before we touch elements
