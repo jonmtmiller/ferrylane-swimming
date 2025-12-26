@@ -88,27 +88,36 @@ a { color: var(--accent); }
 .christmas .card { box-shadow: 0 0 0 2px rgba(198,40,40,.25), 0 0 20px rgba(11,143,47,.25) inset; }
 
 
-
-/* Let the hat anchor to the logo */
-.logo.brand { position: relative; display: inline-block; }
-
-/* Hat position/visibility */
+/* Santa hat tuning for the header */
 #santa-hat.hat {
   position: absolute;
-  width: clamp(28px, 20%, 52px); /* adjust size if needed */
+  /* size */
+  width: 78px;                 /* was ~52px; adjust if your H1 is smaller */
   aspect-ratio: 1.4 / 1;
-  left: -0.15em;   /* nudge horizontally */
-  top: -0.65em;    /* nudge vertically */
-  transform: rotate(-18deg);
+
+  /* placement — tuned for your screenshot */
+  left: -0.32em;               /* nudge right/left */
+  top:  -0.90em;               /* pull down so brim hugs the F */
+
+  /* make the cap look thicker and reduce the tilt */
+  transform-origin: 20% 20%;
+  transform: rotate(-12deg) scale(1.10) scaleY(1.25);
+
   pointer-events: none;
   z-index: 2;
   filter: drop-shadow(0 2px 2px rgba(0,0,0,.25));
-  display: none;   /* hidden by default */
+  display: none;               /* stays hidden unless .christmas on <html> */
 }
 
-/* Show only when Christmas mode is active on <html> */
+/* Show when Christmas mode is active */
 .christmas #santa-hat { display: block; }
 
-/* Optional fine-tunes for very large/small headings */
-/* .christmas #santa-hat { left: -0.25em; top: -0.8em; }   bigger logo */
-/* .christmas #santa-hat { left: -0.10em; top: -0.50em; }  smaller logo */
+/* Mobile tweak (optional) */
+@media (max-width: 520px) {
+  #santa-hat.hat {
+    width: 56px;
+    left: -0.22em;
+    top:  -0.72em;
+    transform: rotate(-12deg) scale(1.08) scaleY(1.22);
+  }
+}
