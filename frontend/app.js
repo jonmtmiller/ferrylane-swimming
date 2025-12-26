@@ -623,7 +623,7 @@ window.addEventListener('DOMContentLoaded', () => {
       setMode(!isOn);
     });
 
-    const enable = isXmasWindow();  // ignores localStorage entirely
+    enable = isXmasWindow();  // ignores localStorage entirely
     
     // Apply initial
     setMode(enable);
