@@ -615,7 +615,8 @@ window.addEventListener('DOMContentLoaded', () => {
     // Decide initial state
     let wants = null;
     try { wants = localStorage.getItem('xmasMode'); } catch {}
-    const enable = (wants === 'on') || (wants == null && isXmasWindow());
+    //const enable = (wants === 'on') || (wants == null && isXmasWindow());
+    const enable = isXmasWindow();  // ignores localStorage entirely
 
     // Wire the toggle
     btn.addEventListener('click', () => {
@@ -623,7 +624,7 @@ window.addEventListener('DOMContentLoaded', () => {
       setMode(!isOn);
     });
 
-    enable = isXmasWindow();  // ignores localStorage entirely
+    
     
     // Apply initial
     setMode(enable);
