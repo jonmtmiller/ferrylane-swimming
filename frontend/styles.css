@@ -106,3 +106,5 @@ a { color: var(--accent); }
 
 .christmas #santa-hat { display: block; }
 
+#santa-hat.hat { transform: rotate(-18deg) scaleY(1.10); }
+
