@@ -619,6 +619,7 @@ window.addEventListener('DOMContentLoaded', () => {
     try { wants = localStorage.getItem('xmasMode'); } catch {}
     //const enable = (wants === 'on') || (wants == null && isXmasWindow());
     const enable = isXmasWindow();  // ignores localStorage entirely
+    btn.hidden = enable; //JM Hide button altogether if we're not in the window
 
     // Wire the toggle
     btn.addEventListener('click', () => {
