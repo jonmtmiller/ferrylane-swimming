@@ -536,7 +536,7 @@ window.addEventListener('DOMContentLoaded', () => {
     //JM: The numbers above were coming out as NaN in browser console
     //return (m === 12 && d >= 25 && d <= 31); // exact window
     //return (m === 12); // exact window
-    return true; // exact window
+    return false; //JM: I just had to bodge this due to the issue above, but perfect would be Dec + 1 Jan
   }
 
   // Ensure the DOM exists before we touch elements
