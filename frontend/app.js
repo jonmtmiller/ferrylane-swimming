@@ -612,6 +612,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const ctx = cnv.getContext('2d'); if (ctx) ctx.clearRect(0,0,cnv.width,cnv.height);
         try { localStorage.setItem('xmasMode', 'off'); } catch {}
       }
+      btn.hidden = true; //JM Hide button altogether if we're not in the window
     }
 
     // Decide initial state
@@ -693,5 +694,6 @@ function setMode(on){
     // Optional: remove the element (or leave it hidden by CSS)
     // const hat = document.getElementById('santa-hat'); if (hat) hat.remove();
   }
+  btn.hidden = true; //JM Hide button altogether if we're not in the window
 }
 
