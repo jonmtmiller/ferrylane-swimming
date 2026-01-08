@@ -1,10 +1,10 @@
+/* ========= Small helpers ========= */
 const $ = (id) => document.getElementById(id);
 
 let tempChart, flowChart;
 const DAY = 24*60*60*1000;
 const daysAgoISO = (n) => new Date(Date.now() - n*DAY).toISOString();
 
-// Met Office icon mapping (keep your version if you already have one)
 const metIcon = (code) => {
   if (code == null) return "❓";
   if ([0, 1].includes(code)) return "☀️";
@@ -23,9 +23,26 @@ const toMph = (v) => v==null ? null : v * MS_TO_MPH; // keep decimals; round on 
 const localDayKey = (date) =>
   new Date(date).toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
 
+function setActive(groupId, days) {
+  const g = document.getElementById(groupId);
+  if (!g) return;
+  [...g.querySelectorAll('button[data-days]')]
+    .forEach(b => b.classList.toggle('active', b.dataset.days === String(days)));
+}
+
+function since(d) {
+  const sec = Math.max(0, (Date.now() - d.getTime())/1000);
+  if (sec < 90) return `${Math.round(sec)}s ago`;
+  const min = sec/60; if (min < 90) return `${Math.round(min)}m ago`;
+  const hr = min/60; if (hr < 36) return `${Math.round(hr)}h ago`;
+  const dd = hr/24; return `${Math.round(dd)}d ago`;
+}
+
+/* ========= Weather helpers ========= */
+
 // Aggregate hourly into local-day buckets (mm total + max winds)
 function bucketHourly(hourly) {
-  const map = new Map(); // key: 'YYYY-MM-DD' -> { mm, maxWind, maxGust }
+  const map = new Map(); // key: 'YYYY-MM-DD' -> { mm, maxWind, maxGust, hasPrecip }
   for (const h of hourly) {
     const t = new Date(h.time);
     const k = localDayKey(t);
@@ -39,43 +56,22 @@ function bucketHourly(hourly) {
   return map;
 }
 
-
-
-
-// Try common daily code field names, then fall back to any key that looks like a sig. weather code.
-function resolveDailyWxCode(d) {
-  const candidates = [
-    'significantWeatherCode',        // some daily payloads use the same name as hourly
-    'daySignificantWeatherCode',     // daytime code
-    'significantWeatherCodeDay',     // alt naming
-    'significantWeatherCodeMostLikely', // some blends/summary variants
-    'weatherCode', 'wxCode'          // very rare alternates
-  ];
-  for (const k of candidates) {
-    const v = d?.[k];
-    if (v !== undefined && v !== null) return v;
-  }
-  // Fallback: pick any property that looks like a “significant…code”
-  for (const [k, v] of Object.entries(d || {})) {
-    if (/significant.*code/i.test(k) && v !== undefined && v !== null) return v;
-  }
-  return null;
-}
-
-// Daily: pick whichever field the API provides - JM: this was created after the one above, but keeping the one that has more info
-/*
+// Try common daily code field names, then fall back to anything “significant…code”
 function resolveDailyWxCode(d) {
   const candidates = [
     'significantWeatherCode', 'daySignificantWeatherCode',
     'significantWeatherCodeDay', 'significantWeatherCodeMostLikely',
     'weatherCode', 'wxCode'
   ];
-  for (const k of candidates) if (d?.[k] != null) return d[k];
-  for (const [k, v] of Object.entries(d||{})) if (/significant.*code/i.test(k) && v != null) return v;
+  for (const k of candidates) {
+    const v = d?.[k];
+    if (v !== undefined && v !== null) return v;
+  }
+  for (const [k, v] of Object.entries(d || {})) {
+    if (/significant.*code/i.test(k) && v != null) return v;
+  }
   return null;
 }
-*/
-
 function resolveDailyPrecipMm(d) {
   const mmKeys = [
     'totalPrecipAmount', 'precipitationAmount', 'totalPrecipitationAmount',
@@ -87,7 +83,6 @@ function resolveDailyPrecipMm(d) {
 function resolveDailyWindMaxMph(d) {
   const spdKeys = ['max10mWindSpeed','windSpeed10mMax','maxWindSpeed10m','windSpeedMax10m'];
   for (const k of spdKeys) if (Number.isFinite(d?.[k])) return d[k];
-  // fallback to gust if that’s all we have
   const g = resolveDailyGustMaxMph(d);
   return Number.isFinite(g) ? g : 0;
 }
@@ -98,25 +93,7 @@ function resolveDailyGustMaxMph(d) {
 }
 const dayName = (dt)=> new Date(dt).toLocaleDateString("en-GB",{weekday:"short"});
 
-
-
-
-function setActive(groupId, days) {
-  const g = document.getElementById(groupId);
-  if (!g) return;
-  [...g.querySelectorAll('button[data-days]')]
-    .forEach(b => b.classList.toggle('active', b.dataset.days === String(days)));
-}
-
-
-function since(d) {
-  const sec = Math.max(0, (Date.now() - d.getTime())/1000);
-  if (sec < 90) return `${Math.round(sec)}s ago`;
-  const min = sec/60; if (min < 90) return `${Math.round(min)}m ago`;
-  const hr = min/60; if (hr < 36) return `${Math.round(hr)}h ago`;
-  const dd = hr/24; return `${Math.round(dd)}d ago`;
-}
-
+/* ========= Temps ========= */
 async function loadTemps(days = 10) {
   const elRiverNow = document.getElementById('riverNow');
   const elAirNow = document.getElementById('airNow');
@@ -173,15 +150,14 @@ async function loadTemps(days = 10) {
   // 1) Try 5-minute file first
   let source = '5-minute', all = await fetchCsv('5m');
 
-console.info('[temps]',
-  'rows:', all.length,
-  'first:', all[0]?.t?.toISOString(),
-  'last:',  all.at?.(-1)?.t?.toISOString()
-);
+  console.info('[temps]',
+    'rows:', all.length,
+    'first:', all[0]?.t?.toISOString(),
+    'last:',  all.at?.(-1)?.t?.toISOString()
+  );
 
-  
   // If the available span is shorter than requested, fall back to hourly
-  const spanDays = all.length ? (all[all.length-1].t - all[0].t) / (24*60*60*1000) : 0;
+  const spanDays = all.length ? (all[all.length-1].t - all[0].t) / DAY : 0;
   if (spanDays + 0.1 < days) {
     console.info('Falling back to hourly');
     try {
@@ -199,15 +175,14 @@ console.info('[temps]',
 
   // 2) Cut window relative to the LAST timestamp in the dataset (not "now")
   const endMs = all[all.length - 1].t.getTime();
-  const cutMs = endMs - days * 24*60*60*1000;
+  const cutMs = endMs - days * DAY;
   const pts = all.filter(p => p.t.getTime() >= cutMs);
 
-  console.info(endMs, cutMs, pts.length);
   console.info('[pts]',
-  'rows:', pts.length,
-  'first:', pts[0]?.t?.toISOString(),
-  'last:',  pts.at?.(-1)?.t?.toISOString()
-);
+    'rows:', pts.length,
+    'first:', pts[0]?.t?.toISOString(),
+    'last:',  pts.at?.(-1)?.t?.toISOString()
+  );
 
   if (!pts.length) {
     elRiverNow.textContent = 'No data';
@@ -220,23 +195,22 @@ console.info('[temps]',
   const last = pts[pts.length - 1];
   elRiverNow.textContent = `${last.river.toFixed(1)}°C`;
   elAirNow.textContent   = last.air != null ? `${last.air.toFixed(1)}°C` : '—';
-  const sec = Math.max(0, (Date.now() - last.t.getTime())/1000);
-  elUpdated.textContent = sec < 90 ? `${Math.round(sec)}s ago`
-    : sec/60 < 90 ? `${Math.round(sec/60)}m ago`
-    : sec/3600 < 36 ? `${Math.round(sec/3600)}h ago`
-    : `${Math.round(sec/86400)}d ago`;
+  elUpdated.textContent  = since(last.t);
 
   // 4) Title shows requested range + data source used (optional)
   titleEl.textContent = `Temperatures (last ${days} days${source === 'hourly' ? ' • hourly data' : ''})`;
 
-  // 5) Render chart
-  /*tempChart?.destroy();
+  // 5) Render chart with explicit x window (ms)
+  const xMin = pts[0].t.getTime();
+  const xMax = pts[pts.length - 1].t.getTime();
+
+  tempChart?.destroy();
   tempChart = new Chart(document.getElementById('tempChart'), {
     type: 'line',
     data: {
       datasets: [
-        { label: 'River °C', data: pts.map(p => ({ x: p.t, y: p.river })) },
-        { label: 'Air °C',   data: pts.filter(p => p.air != null).map(p => ({ x: p.t, y: p.air })) },
+        { label: 'River °C', data: pts.map(p => ({ x: p.t.getTime(), y: p.river })) },
+        { label: 'Air °C',   data: pts.filter(p => p.air != null).map(p => ({ x: p.t.getTime(), y: p.air })) },
       ]
     },
     options: {
@@ -244,56 +218,19 @@ console.info('[temps]',
       plugins: { legend: { position: 'bottom' }, decimation: { enabled: true, algorithm: 'min-max' } },
       interaction: { intersect: false, mode: 'nearest' },
       scales: {
-        x: { type: 'time', time: { unit: days <= 2 ? 'hour' : 'day' } },
+        x: { type: 'time', min: xMin, max: xMax, time: { unit: days <= 2 ? 'hour' : 'day' } },
         y: { title: { display: true, text: '°C' } }
       }
     }
-  });*/
-
-  // after you have `pts`
-const xMin = pts[0].t.getTime();
-const xMax = pts[pts.length - 1].t.getTime();
-
-tempChart?.destroy();
-tempChart = new Chart(document.getElementById('tempChart'), {
-  type: 'line',
-  data: {
-    datasets: [
-      // NOTE: use getTime() for x
-      { label: 'River °C', data: pts.map(p => ({ x: p.t.getTime(), y: p.river })) },
-      { label: 'Air °C',   data: pts.filter(p => p.air != null).map(p => ({ x: p.t.getTime(), y: p.air })) },
-    ]
-  },
-  options: {
-    animation: false, parsing: false, responsive: true,
-    plugins: { legend: { position: 'bottom' }, decimation: { enabled: true, algorithm: 'min-max' } },
-    interaction: { intersect: false, mode: 'nearest' },
-    scales: {
-      x: {
-        type: 'time',
-        min: xMin,               // <-- explicitly set window
-        max: xMax,
-        time: { unit: days <= 2 ? 'hour' : 'day' }
-      },
-      y: { title: { display: true, text: '°C' } }
-    }
-  }
-});
-
+  });
 
   setActive('tempRanges', days);
 }
 
-
-
-
-
+/* ========= Flow ========= */
 async function loadFlow(days = 14) {
-  const DAY = 24 * 60 * 60 * 1000;
   const sinceISO = new Date(Date.now() - days * DAY).toISOString();
-
-  // Ask your proxy for a big enough window (limit ~= 15-min samples per day)
-  const estLimit = Math.ceil(days * 96 * 1.2); // buffer
+  const estLimit = Math.ceil(days * 96 * 1.2); // ~15-min samples per day with buffer
   const url = `/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&since=${encodeURIComponent(sinceISO)}&limit=${estLimit}`;
 
   let data;
@@ -318,7 +255,7 @@ async function loadFlow(days = 14) {
     return;
   }
 
-  // Anchor the window to the newest reading we actually have
+  // Anchor window to newest reading
   const endMs = items[items.length - 1].t.getTime();
   const cutMs = endMs - days * DAY;
   const pts = items.filter(p => p.t.getTime() >= cutMs);
@@ -331,14 +268,9 @@ async function loadFlow(days = 14) {
   // “Now” panel
   const last = pts[pts.length - 1];
   flowNow.textContent = `${last.v.toFixed(1)} m³/s`;
-  const sec = Math.max(0, (Date.now() - last.t.getTime()) / 1000);
-  flowUpdated.textContent =
-    sec < 90 ? `${Math.round(sec)}s ago`
-    : sec / 60 < 90 ? `${Math.round(sec / 60)}m ago`
-    : sec / 3600 < 36 ? `${Math.round(sec / 3600)}h ago`
-    : `${Math.round(sec / 86400)}d ago`;
+  flowUpdated.textContent = since(last.t);
 
-  // Title + chart (NOTE: feed milliseconds to x, and set min/max)
+  // Title + chart
   document.getElementById('flowTitle').textContent = `Flow rate (last ${days} days)`;
   const xMin = pts[0].t.getTime();
   const xMax = pts[pts.length - 1].t.getTime();
@@ -352,21 +284,11 @@ async function loadFlow(days = 14) {
       ]
     },
     options: {
-      animation: false,
-      parsing: false,
-      responsive: true,
-      plugins: {
-        legend: { position: 'bottom' },
-        decimation: { enabled: true, algorithm: 'min-max' }
-      },
+      animation: false, parsing: false, responsive: true,
+      plugins: { legend: { position: 'bottom' }, decimation: { enabled: true, algorithm: 'min-max' } },
       interaction: { intersect: false, mode: 'nearest' },
       scales: {
-        x: {
-          type: 'time',
-          min: xMin,
-          max: xMax,
-          time: { unit: days <= 2 ? 'hour' : 'day' }
-        },
+        x: { type: 'time', min: xMin, max: xMax, time: { unit: days <= 2 ? 'hour' : 'day' } },
         y: { title: { display: true, text: 'm³/s' } }
       }
     }
@@ -375,9 +297,7 @@ async function loadFlow(days = 14) {
   setActive('flowRanges', days);
 }
 
-
-
-
+/* ========= EDM ========= */
 async function loadEDM() {
   try {
     const res = await fetch('/api/tw/status?site=Wargrave', { cache: 'no-store' });
@@ -391,13 +311,13 @@ async function loadEDM() {
     $('edmStatus').textContent = String(status).toUpperCase();
     if (start && !stop) $('sewageCard').classList.add('alert');
     $('edmDetail').textContent = start
-      ? (stop ? `Last event ended ${new Date(stop).toLocaleString()}`
+      ? (stop ? `Last event ended ${new Date(stop).toLocaleString()}` 
               : `Event started ${new Date(start).toLocaleString()}`)
       : 'No recent event info';
   } catch(e){ console.error('EDM load failed', e); $('edmStatus').textContent='Unavailable'; $('edmDetail').textContent='Check later'; }
 }
 
-
+/* ========= Weather (Met Office proxy) ========= */
 async function loadWeather(lat = 51.50144, lon = -0.870961) {
   let data;
   try {
@@ -435,19 +355,17 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
     .filter(d => new Date(d.time).getTime() >= startLocalMidnight.getTime())
     .slice(0, 6);
 
-  const dayName = (dt)=> new Date(dt).toLocaleDateString("en-GB",{weekday:"short"});
-
   document.getElementById("wx-daily").innerHTML = dailyFromToday.map(d => {
     // Icon: use day code (fallback to night code if needed)
-    const code = d.daySignificantWeatherCode ?? d.significantWeatherCode ?? d.nightSignificantWeatherCode ?? null;
+    const code = resolveDailyWxCode(d) ?? d.nightSignificantWeatherCode ?? null;
 
-    // Rain: prefer summed mm from hourly (if we have that day in range), otherwise show probability
+    // Rain: prefer summed mm from hourly (if we have that day), otherwise show probability
     const k = localDayKey(d.time);
     const agg = buckets.get(k);
-    const mm = agg?.hasPrecip ? agg.mm : null; // only show if we truly had hourly for that day
+    const mm = agg?.hasPrecip ? agg.mm : null; // show only if hourly covers that day
     const prob = d.dayProbabilityOfPrecipitation ?? d.dayProbabilityOfRain ?? null;
 
-    // Wind/Gust: prefer hourly max; otherwise use midday values
+    // Wind/Gust: prefer hourly max; otherwise midday values
     const windMps = agg ? agg.maxWind : (d.midday10MWindSpeed ?? d.midnight10MWindSpeed ?? 0);
     const gustMps = agg ? agg.maxGust : (d.midday10MWindGust ?? d.midnight10MWindGust ?? null);
 
@@ -490,11 +408,38 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
   }).join("");
 }
 
+/* ========= Santa hat helper (kept) ========= */
+function ensureSantaHat() {
+  const brand = document.querySelector('.brand');
+  if (!brand) return;
 
+  let hat = document.getElementById('santa-hat');
+  if (!hat) {
+    hat = document.createElement('img');
+    hat.id = 'santa-hat';
+    hat.className = 'hat';
+    hat.alt = '';
+    hat.decoding = 'async';
+    const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
+  <defs>
+    <linearGradient id="r" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#e53935"/>
+      <stop offset="1" stop-color="#b71c1c"/>
+    </linearGradient>
+  </defs>
+  <path d="M12 82 C 18 35, 70 8, 128 20 C 85 35, 66 55, 52 82 Z" fill="url(#r)"/>
+  <rect x="8" y="78" width="124" height="18" rx="9" ry="9" fill="#ffffff"/>
+  <circle cx="120" cy="26" r="12" fill="#ffffff"/>
+</svg>`;
+    hat.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    brand.appendChild(hat);
+  }
+}
 
-
+/* ========= Collapsible forecast & initial loads ========= */
 window.addEventListener('DOMContentLoaded', () => {
-  // collapse by default
+  // collapse forecast by default
   const card = document.getElementById('forecastCard');
   const toggle = document.getElementById('wx-toggle');
   if (card && toggle) {
@@ -505,8 +450,7 @@ window.addEventListener('DOMContentLoaded', () => {
       toggle.textContent = isCollapsed ? 'Show forecast ▾' : 'Hide forecast ▴';
     });
   }
-  
-  
+
   // defaults that match the 'active' buttons
   loadTemps(10);
   loadFlow(14);
@@ -524,176 +468,170 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-
-// --- Christmas mode (Dec 25–31, Europe/London) ---
-(function christmasMode(){
+/* ========= Seasonal effects (Christmas + Snow) =========
+   Christmas theme: ON 1 Dec – 1 Jan (inclusive), hidden otherwise.
+   Snow: visible Dec–Feb; default ON in Dec, OFF in Jan–Feb (remember choice in localStorage per winter).
+========================================================= */
+(function seasonalEffects() {
   const TZ = "Europe/London";
-
-  function isXmasWindow(dUtc = new Date()){
-    const uk = new Date(dUtc.toLocaleString("en-GB", { timeZone: TZ }));
-    const m = uk.getMonth() + 1; // 1..12
-    const d = uk.getDate();      // 1..31
-    //JM: The numbers above were coming out as NaN in browser console
-    //return (m === 12 && d >= 25 && d <= 31); // exact window
-    //return (m === 12); // exact window
-    return false; //JM: I just had to bodge this due to the issue above, but perfect would be Dec + 1 Jan
-  }
-
-  // Ensure the DOM exists before we touch elements
-  window.addEventListener('DOMContentLoaded', () => {
-    // Make sure elements exist (create if missing so we never bail)
-    let btn = document.getElementById('xmas-toggle');
-    let cnv = document.getElementById('snow-canvas');
-
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = 'xmas-toggle';
-      btn.className = 'btn btn-small xmas-toggle';
-      btn.title = 'Toggle Christmas mode';
-      document.body.appendChild(btn);
-    }
-    if (!cnv) {
-      cnv = document.createElement('canvas');
-      cnv.id = 'snow-canvas';
-      cnv.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(cnv);
-    }
-
-    const root = document.documentElement;
-    let stopSnow = () => {};
-
-    function startSnow(canvas) {
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { stopSnow = () => {}; return; }
-      const ctx = canvas.getContext("2d");
-      let w, h, flakes = [], rafId;
-      const DPR = Math.min(window.devicePixelRatio || 1, 2);
-      function resize(){ w = canvas.width = Math.floor(window.innerWidth * DPR);
-                         h = canvas.height= Math.floor(window.innerHeight* DPR); }
-      resize(); window.addEventListener("resize", resize);
-
-      const N = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60;
-      for (let i=0;i<N;i++) flakes.push({
-        x: Math.random()*w, y: Math.random()*h,
-        r: 0.7+Math.random()*2.2, s: 0.4+Math.random()*0.9,
-        a: Math.random()*Math.PI*2, drift: 0.3+Math.random()*0.7, o: 0.5+Math.random()*0.5
-      });
-
-      function tick(){
-        ctx.clearRect(0,0,w,h);
-        ctx.fillStyle = "#fff";
-        ctx.globalCompositeOperation = "lighter";
-        for (const f of flakes){
-          f.y += f.s * DPR;
-          f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
-          if (f.y > h + 5) { f.y = -10; f.x = Math.random()*w; }
-          if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
-          ctx.globalAlpha = f.o;
-          ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI*2); ctx.fill();
-        }
-        rafId = requestAnimationFrame(tick);
-      }
-      tick();
-
-      stopSnow = () => { cancelAnimationFrame(rafId); window.removeEventListener("resize", resize); };
-    }
-
-    function setMode(on){
-      if (on) {
-        root.classList.add('christmas');
-        btn.hidden = false;
-        btn.textContent = '🎄 Christmas mode: on';
-        startSnow(cnv);
-        try { localStorage.setItem('xmasMode', 'on'); } catch {}
-      } else {
-        root.classList.remove('christmas');
-        btn.hidden = false;
-        btn.textContent = '🎄 Christmas mode: off';
-        stopSnow();
-        const ctx = cnv.getContext('2d'); if (ctx) ctx.clearRect(0,0,cnv.width,cnv.height);
-        try { localStorage.setItem('xmasMode', 'off'); } catch {}
-      }
-      btn.hidden = true; //JM Hide button altogether if we're not in the window
-    }
-
-    // Decide initial state
-    let wants = null;
-    try { wants = localStorage.getItem('xmasMode'); } catch {}
-    //const enable = (wants === 'on') || (wants == null && isXmasWindow());
-    const enable = isXmasWindow();  // ignores localStorage entirely
-    btn.hidden = enable; //JM Hide button altogether if we're not in the window
-
-    // Wire the toggle
-    btn.addEventListener('click', () => {
-      const isOn = root.classList.contains('christmas');
-      setMode(!isOn);
-    });
-
-    
-    
-    // Apply initial
-    setMode(enable);
-  });
-})();
-
-
-
-
-function ensureSantaHat() {
-  const brand = document.querySelector('.brand');
-  if (!brand) return;
-
-  // already added?
-  let hat = document.getElementById('santa-hat');
-  if (!hat) {
-    hat = document.createElement('img');
-    hat.id = 'santa-hat';
-    hat.className = 'hat';
-    hat.alt = '';
-    hat.decoding = 'async';
-    // Inline SVG → data URL (utf8-encoded)
-    const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100">
-  <defs>
-    <linearGradient id="r" x1="0" x2="0" y1="0" y2="1">
-      <stop offset="0" stop-color="#e53935"/>
-      <stop offset="1" stop-color="#b71c1c"/>
-    </linearGradient>
-  </defs>
-  <!-- red cap -->
-  <path d="M12 82 C 18 35, 70 8, 128 20 C 85 35, 66 55, 52 82 Z" fill="url(#r)"/>
-  <!-- brim -->
-  <rect x="8" y="78" width="124" height="18" rx="9" ry="9" fill="#ffffff"/>
-  <!-- bobble -->
-  <circle cx="120" cy="26" r="12" fill="#ffffff"/>
-</svg>`;
-    hat.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-    brand.appendChild(hat);
-  }
-}
-
-// In your existing Christmas mode code, call ensureSantaHat() on enable,
-// and optionally remove it on disable:
-function setMode(on){
   const root = document.documentElement;
-  const btn  = document.getElementById('xmas-toggle');
-  const cnv  = document.getElementById('snow-canvas');
 
-  if (on) {
-    root.classList.add('christmas');
-    btn.hidden = false;
-    btn.textContent = '🎄 Christmas mode: on';
-    // ... your startSnow(canvas) call ...
-    try { localStorage.setItem('xmasMode', 'on'); } catch {}
-    ensureSantaHat(); // <- add hat when turning on
-  } else {
-    root.classList.remove('christmas');
-    btn.hidden = false;
-    btn.textContent = '🎄 Christmas mode: off';
-    // ... your stopSnow() code ...
-    try { localStorage.setItem('xmasMode', 'off'); } catch {}
-    // Optional: remove the element (or leave it hidden by CSS)
-    // const hat = document.getElementById('santa-hat'); if (hat) hat.remove();
+  // Robust UK date parts
+  function ukParts(dUtc = new Date()) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: TZ, year: "numeric", month: "numeric", day: "numeric"
+    }).formatToParts(dUtc).reduce((acc, p) => (p.type !== "literal" ? (acc[p.type] = p.value, acc) : acc), {});
+    return { y: +parts.year, m: +parts.month, d: +parts.day };
   }
-  btn.hidden = true; //JM Hide button altogether if we're not in the window
-}
 
+  // Windows
+  function inChristmasWindow() {
+    const { m, d } = ukParts();
+    // 1 Dec ... 1 Jan (inclusive)
+    return (m === 12 && d >= 1) || (m === 1 && d === 1);
+  }
+  function inSnowSeason() {
+    const { m } = ukParts();
+    // Dec, Jan, Feb
+    return m === 12 || m === 1 || m === 2;
+  }
+  function inJanFeb() {
+    const { m } = ukParts();
+    return m === 1 || m === 2;
+  }
+
+  // Elements: a simple "Snow" toggle (created if missing) + canvas
+  let btn = document.getElementById("snow-toggle");
+  let cnv = document.getElementById("snow-canvas");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "snow-toggle";
+    btn.className = "btn btn-small xmas-toggle";
+    btn.title = "Toggle snow";
+    btn.textContent = "Snow";
+    document.body.appendChild(btn);
+  }
+  if (!cnv) {
+    cnv = document.createElement("canvas");
+    cnv.id = "snow-canvas";
+    cnv.setAttribute("aria-hidden", "true");
+    document.body.appendChild(cnv);
+  }
+
+  // Snow engine
+  let rafId = null;
+  let onResize = null;
+
+  function startSnow(canvas) {
+    if (rafId) return; // already running
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const ctx = canvas.getContext("2d");
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    let w = 0, h = 0, flakes = [];
+
+    function resize() {
+      w = canvas.width  = Math.floor(window.innerWidth  * DPR);
+      h = canvas.height = Math.floor(window.innerHeight * DPR);
+      const n = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60;
+      flakes = [];
+      for (let i = 0; i < n; i++) {
+        flakes.push({
+          x: Math.random() * w, y: Math.random() * h,
+          r: 0.7 + Math.random() * 2.2,
+          s: 0.4 + Math.random() * 0.9,
+          a: Math.random() * Math.PI * 2,
+          drift: 0.3 + Math.random() * 0.7,
+          o: 0.5 + Math.random() * 0.5
+        });
+      }
+    }
+    resize();
+    onResize = () => resize();
+    window.addEventListener("resize", onResize);
+
+    function tick() {
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#fff";
+      ctx.globalCompositeOperation = "lighter";
+      for (const f of flakes) {
+        f.y += f.s * DPR;
+        f.x += Math.cos((f.a += 0.01)) * f.drift * DPR;
+        if (f.y > h + 5) { f.y = -10; f.x = Math.random() * w; }
+        if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
+        ctx.globalAlpha = f.o;
+        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI * 2); ctx.fill();
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+    tick();
+  }
+
+  function stopSnow(canvas) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    if (onResize) { window.removeEventListener("resize", onResize); onResize = null; }
+    const ctx = canvas.getContext("2d");
+    ctx && ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Theme + snow control
+  function enableChristmasTheme(on) {
+    if (on) {
+      root.classList.add("christmas");
+      try { ensureSantaHat && ensureSantaHat(); } catch {}
+    } else {
+      root.classList.remove("christmas");
+    }
+  }
+
+  function setSnow(on) {
+    btn.dataset.on = on ? "1" : "";
+    btn.textContent = on ? "Snow: on" : "Snow: off";
+    if (on) startSnow(cnv); else stopSnow(cnv);
+  }
+
+  // localStorage key for Jan–Feb of the current UK year
+  function snowPrefKey() {
+    const { y } = ukParts();
+    return `snowPref-${y}`; // remembered only for Jan–Feb of year y
+  }
+
+  // Initialisation according to windows
+  const xmas = inChristmasWindow();
+  const snowWindow = inSnowSeason();
+  const janFeb = inJanFeb();
+
+  // Button only visible in Dec–Feb
+  btn.hidden = !snowWindow;
+
+  // Christmas theme: ON during window; OFF otherwise
+  enableChristmasTheme(xmas);
+
+  // Snow default & stored preference:
+  let snowOn;
+  if (xmas) {
+    // Dec 1 – Jan 1: force default ON (ignore stored)
+    snowOn = true;
+  } else if (janFeb) {
+    // Jan–Feb: default OFF unless user preference says otherwise
+    let stored = null;
+    try { stored = localStorage.getItem(snowPrefKey()); } catch {}
+    snowOn = stored ? stored === 'on' : false;
+  } else {
+    snowOn = false;
+  }
+  setSnow(snowOn);
+
+  // Toggle handler
+  btn.addEventListener("click", () => {
+    const next = !(btn.dataset.on === "1");
+    setSnow(next);
+    // Persist only during Jan–Feb; clear otherwise
+    if (janFeb) {
+      try { localStorage.setItem(snowPrefKey(), next ? 'on' : 'off'); } catch {}
+    } else {
+      try { localStorage.removeItem(snowPrefKey()); } catch {}
+    }
+  });
+
+})();
