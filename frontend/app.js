@@ -468,15 +468,18 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-/* ========= Seasonal effects (Christmas + Snow) =========
+
+
+/* ========= Seasonal effects (Christmas + Snow + 💩 easter egg) =========
    Christmas theme: ON 1 Dec – 1 Jan (inclusive), hidden otherwise.
    Snow: visible Dec–Feb; default ON in Dec, OFF in Jan–Feb (remember choice in localStorage per winter).
-========================================================= */
+   Easter egg: triple-click “Snow” within 7s → 💩 mode; stored in sessionStorage for this tab.
+======================================================================= */
 (function seasonalEffects() {
   const TZ = "Europe/London";
   const root = document.documentElement;
 
-  // Robust UK date parts
+  // --- robust UK date parts ---
   function ukParts(dUtc = new Date()) {
     const parts = new Intl.DateTimeFormat("en-GB", {
       timeZone: TZ, year: "numeric", month: "numeric", day: "numeric"
@@ -484,23 +487,12 @@ window.addEventListener('DOMContentLoaded', () => {
     return { y: +parts.year, m: +parts.month, d: +parts.day };
   }
 
-  // Windows
-  function inChristmasWindow() {
-    const { m, d } = ukParts();
-    // 1 Dec ... 1 Jan (inclusive)
-    return (m === 12 && d >= 1) || (m === 1 && d === 1);
-  }
-  function inSnowSeason() {
-    const { m } = ukParts();
-    // Dec, Jan, Feb
-    return m === 12 || m === 1 || m === 2;
-  }
-  function inJanFeb() {
-    const { m } = ukParts();
-    return m === 1 || m === 2;
-  }
+  // --- seasonal windows ---
+  function inChristmasWindow() { const { m, d } = ukParts(); return (m === 12 && d >= 1) || (m === 1 && d === 1); }
+  function inSnowSeason() { const { m } = ukParts(); return m === 12 || m === 1 || m === 2; }
+  function inJanFeb() { const { m } = ukParts(); return m === 1 || m === 2; }
 
-  // Elements: a simple "Snow" toggle (created if missing) + canvas
+  // --- elements ---
   let btn = document.getElementById("snow-toggle");
   let cnv = document.getElementById("snow-canvas");
   if (!btn) {
@@ -518,12 +510,23 @@ window.addEventListener('DOMContentLoaded', () => {
     document.body.appendChild(cnv);
   }
 
-  // Snow engine
+  // --- snow engine state ---
   let rafId = null;
   let onResize = null;
+  let pooMode = false; // easter egg (session only)
 
+  try {
+    pooMode = sessionStorage.getItem("pooMode") === "1";
+  } catch {}
+
+  function savePoo(v) {
+    pooMode = !!v;
+    try { sessionStorage.setItem("pooMode", pooMode ? "1" : "0"); } catch {}
+  }
+
+  // --- draw helpers ---
   function startSnow(canvas) {
-    if (rafId) return; // already running
+    if (rafId) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     const ctx = canvas.getContext("2d");
@@ -533,37 +536,72 @@ window.addEventListener('DOMContentLoaded', () => {
     function resize() {
       w = canvas.width  = Math.floor(window.innerWidth  * DPR);
       h = canvas.height = Math.floor(window.innerHeight * DPR);
-      const n = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60;
+      // perf: fewer particles if using emoji (heavier than circles)
+      const density = pooMode ? 28000 : 18000;
+      const base = pooMode ? 44 : 60;
+      const N = Math.floor((window.innerWidth * window.innerHeight) / density) + base;
+
       flakes = [];
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < N; i++) {
         flakes.push({
-          x: Math.random() * w, y: Math.random() * h,
-          r: 0.7 + Math.random() * 2.2,
-          s: 0.4 + Math.random() * 0.9,
-          a: Math.random() * Math.PI * 2,
-          drift: 0.3 + Math.random() * 0.7,
-          o: 0.5 + Math.random() * 0.5
+          x: Math.random() * w,
+          y: Math.random() * h,
+          r: 0.9 + Math.random() * 1.8,           // “size”
+          s: 0.45 + Math.random() * 0.9,          // fall speed
+          a: Math.random() * Math.PI * 2,         // phase
+          drift: 0.3 + Math.random() * 0.7,       // side-to-side
+          o: 0.55 + Math.random() * 0.45,         // opacity
+          spin: (Math.random() * 0.8 - 0.4) * 0.02
         });
       }
     }
+
     resize();
     onResize = () => resize();
     window.addEventListener("resize", onResize);
 
+    function drawCircle(f) {
+      ctx.globalAlpha = f.o;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.r * DPR * 1.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawPoo(f) {
+      // render small emoji with gentle rotation
+      const px = 22 * f.r * DPR; // emoji size (tweakable)
+      ctx.save();
+      ctx.globalAlpha = Math.min(0.95, f.o + 0.1);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `${px}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"`;
+      ctx.translate(f.x, f.y);
+      ctx.rotate(f.a * 0.15);
+      ctx.fillText("💩", 0, 0);
+      ctx.restore();
+    }
+
     function tick() {
       ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "#fff";
-      ctx.globalCompositeOperation = "lighter";
+      ctx.globalCompositeOperation = pooMode ? "source-over" : "lighter";
+
       for (const f of flakes) {
+        // motion
         f.y += f.s * DPR;
         f.x += Math.cos((f.a += 0.01)) * f.drift * DPR;
+        f.a += f.spin;
+
+        // wrap
         if (f.y > h + 5) { f.y = -10; f.x = Math.random() * w; }
         if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
-        ctx.globalAlpha = f.o;
-        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI * 2); ctx.fill();
+
+        // draw
+        if (pooMode) drawPoo(f); else drawCircle(f);
       }
       rafId = requestAnimationFrame(tick);
     }
+
     tick();
   }
 
@@ -574,7 +612,7 @@ window.addEventListener('DOMContentLoaded', () => {
     ctx && ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 
-  // Theme + snow control
+  // --- theme + snow control ---
   function enableChristmasTheme(on) {
     if (on) {
       root.classList.add("christmas");
@@ -586,34 +624,30 @@ window.addEventListener('DOMContentLoaded', () => {
 
   function setSnow(on) {
     btn.dataset.on = on ? "1" : "";
-    btn.textContent = on ? "Snow: on" : "Snow: off";
+    // show 💩 only when easter egg active AND snow visible AND on
+    const label = pooMode && !btn.hidden && on ? "Snow: on 💩" : on ? "Snow: on" : "Snow: off";
+    btn.textContent = label;
     if (on) startSnow(cnv); else stopSnow(cnv);
   }
 
-  // localStorage key for Jan–Feb of the current UK year
+  // --- localStorage key for Jan–Feb preference ---
   function snowPrefKey() {
     const { y } = ukParts();
-    return `snowPref-${y}`; // remembered only for Jan–Feb of year y
+    return `snowPref-${y}`;
   }
 
-  // Initialisation according to windows
+  // --- initialise per season ---
   const xmas = inChristmasWindow();
   const snowWindow = inSnowSeason();
   const janFeb = inJanFeb();
 
-  // Button only visible in Dec–Feb
   btn.hidden = !snowWindow;
-
-  // Christmas theme: ON during window; OFF otherwise
   enableChristmasTheme(xmas);
 
-  // Snow default & stored preference:
   let snowOn;
   if (xmas) {
-    // Dec 1 – Jan 1: force default ON (ignore stored)
     snowOn = true;
   } else if (janFeb) {
-    // Jan–Feb: default OFF unless user preference says otherwise
     let stored = null;
     try { stored = localStorage.getItem(snowPrefKey()); } catch {}
     snowOn = stored ? stored === 'on' : false;
@@ -622,15 +656,38 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   setSnow(snowOn);
 
-  // Toggle handler
+  // --- easter egg triple-click detection (3 toggles in <= 7s) ---
+  const CLICK_WINDOW_MS = 7000;
+  const clicks = [];
+
   btn.addEventListener("click", () => {
+    // actual on/off toggle
     const next = !(btn.dataset.on === "1");
     setSnow(next);
-    // Persist only during Jan–Feb; clear otherwise
+
+    // remember Jan–Feb choice
     if (janFeb) {
       try { localStorage.setItem(snowPrefKey(), next ? 'on' : 'off'); } catch {}
     } else {
       try { localStorage.removeItem(snowPrefKey()); } catch {}
+    }
+
+    // record click time & prune
+    const now = Date.now();
+    clicks.push(now);
+    while (clicks.length && now - clicks[0] > CLICK_WINDOW_MS) clicks.shift();
+
+    // 3 clicks within window? toggle poo mode and restart animation to apply density change
+    if (clicks.length >= 3) {
+      savePoo(!pooMode);            // flip mode
+      clicks.length = 0;            // reset
+      if (btn.dataset.on === "1") { // if currently running, restart to rebuild flakes
+        stopSnow(cnv);
+        setSnow(true);
+      } else {
+        // update label to show the 💩 hint even when off
+        btn.textContent = pooMode ? "Snow: off 💩" : "Snow: off";
+      }
     }
   });
 
