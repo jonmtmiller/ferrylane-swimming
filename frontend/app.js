@@ -408,6 +408,46 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
   }).join("");
 }
 
+async function loadBoards(centerReach = "Shiplake Lock to Marsh Lock") {
+  const row = document.getElementById("boardRow");
+  if (!row) return;
+  row.innerHTML = "<div class='muted'>Loading…</div>";
+
+  try {
+    const res = await fetch("/api/ea/boards", { cache: "no-store" });
+    const items = await res.json();
+
+    const makeArrow = (trend) => trend === "increasing" ? "↑"
+                          : trend === "decreasing" ? "↓" : "";
+
+    row.innerHTML = items.map(r => {
+      const cls = `board ${r.status}`;
+      const arrow = makeArrow(r.trend);
+      const label = r.status === "red" ? "Strong stream"
+                  : r.status === "yellow" && r.trend === "increasing" ? "Stream increasing"
+                  : r.status === "yellow" && r.trend === "decreasing" ? "Stream decreasing"
+                  : "No stream warnings";
+      const isCenter = r.reach.toLowerCase() === centerReach.toLowerCase();
+      return `
+        <div class="${cls}${isCenter ? " center": ""}" role="listitem" data-reach="${r.reach}">
+          <div class="reach">${r.reach}</div>
+          <div class="status">
+            <span class="badge">${label}</span>
+            ${arrow ? `<span class="arrow">${arrow}</span>` : ``}
+          </div>
+        </div>`;
+    }).join("");
+
+    // Scroll the centred reach into view (if present)
+    const el = [...row.children].find(div => div.dataset.reach?.toLowerCase() === centerReach.toLowerCase());
+    if (el) el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  } catch (e) {
+    console.error("boards load failed", e);
+    row.innerHTML = "<div class='muted'>Couldn’t load EA boards right now.</div>";
+  }
+}
+
+
 /* ========= Santa hat helper (kept) ========= */
 function ensureSantaHat() {
   const brand = document.querySelector('.brand');
@@ -456,6 +496,8 @@ window.addEventListener('DOMContentLoaded', () => {
   loadFlow(14);
   loadEDM();
   loadWeather();
+  loadBoards("Shiplake Lock to Marsh Lock");
+
 
   // range button handlers
   document.getElementById('tempRanges')?.addEventListener('click', (e) => {
