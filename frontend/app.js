@@ -408,6 +408,7 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
   }).join("");
 }
 
+
 async function loadBoards(centerReach = "Shiplake Lock to Marsh Lock") {
   const row = document.getElementById("boardRow");
   if (!row) return;
@@ -415,18 +416,29 @@ async function loadBoards(centerReach = "Shiplake Lock to Marsh Lock") {
 
   try {
     const res = await fetch("/api/ea/boards", { cache: "no-store" });
-    const items = await res.json();
+    const itemsRaw = await res.json();
 
-    const makeArrow = (trend) => trend === "increasing" ? "↑"
-                          : trend === "decreasing" ? "↓" : "";
+    // Guard against weird shapes
+    const items = (Array.isArray(itemsRaw) ? itemsRaw : [])
+      .filter(r => r && typeof r.reach === "string" && typeof r.status === "string");
+
+    const makeArrow = (trend) =>
+      trend === "increasing" ? "↑" : trend === "decreasing" ? "↓" : "";
+
+    if (!items.length) {
+      row.innerHTML = "<div class='muted'>No board data available right now.</div>";
+      return;
+    }
 
     row.innerHTML = items.map(r => {
       const cls = `board ${r.status}`;
       const arrow = makeArrow(r.trend);
-      const label = r.status === "red" ? "Strong stream"
-                  : r.status === "yellow" && r.trend === "increasing" ? "Stream increasing"
-                  : r.status === "yellow" && r.trend === "decreasing" ? "Stream decreasing"
-                  : "No stream warnings";
+      const label =
+        r.status === "red" ? "Strong stream" :
+        (r.status === "yellow" && r.trend === "increasing") ? "Stream increasing" :
+        (r.status === "yellow" && r.trend === "decreasing") ? "Stream decreasing" :
+        "No stream warnings";
+
       const isCenter = r.reach.toLowerCase() === centerReach.toLowerCase();
       return `
         <div class="${cls}${isCenter ? " center": ""}" role="listitem" data-reach="${r.reach}">
@@ -438,14 +450,15 @@ async function loadBoards(centerReach = "Shiplake Lock to Marsh Lock") {
         </div>`;
     }).join("");
 
-    // Scroll the centred reach into view (if present)
-    const el = [...row.children].find(div => div.dataset.reach?.toLowerCase() === centerReach.toLowerCase());
+    // Try to center the target reach if present
+    const el = [...row.children].find(div => (div.dataset.reach || "").toLowerCase() === centerReach.toLowerCase());
     if (el) el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   } catch (e) {
     console.error("boards load failed", e);
     row.innerHTML = "<div class='muted'>Couldn’t load EA boards right now.</div>";
   }
 }
+
 
 
 /* ========= Santa hat helper (kept) ========= */
