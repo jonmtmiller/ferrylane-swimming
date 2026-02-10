@@ -108,3 +108,31 @@ a { color: var(--accent); }
 
 #santa-hat.hat { transform: rotate(-18deg) scaleY(1.10); }
 
+
+.board-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  gap: .5rem;
+  overflow-x: auto;
+  padding: .5rem .25rem;
+  scroll-snap-type: x mandatory;
+}
+.board {
+  scroll-snap-align: center;
+  border-radius: .6rem;
+  padding: .5rem .75rem;
+  min-width: 12rem;
+  line-height: 1.25;
+  border: 1px solid var(--border,#e2e8f0);
+  background: #fff;
+}
+.board .reach { font-weight: 600; }
+.board .badge { font: 600 .85rem/1 system-ui; padding: .1rem .4rem; border-radius: .4rem; }
+.board.green  { border-color: #94d3a2; background: #effaf1; }
+.board.yellow { border-color: #f2c97d; background: #fff7e6; }
+.board.red    { border-color: #f29a9a; background: #fff0f0; }
+.board .status { display:flex; gap:.4rem; align-items:center; margin-top:.25rem; }
+.board .arrow { font-size: 1rem; }
+.board .center { outline: 2px dashed #94a3b8; outline-offset:2px; }
+
