@@ -408,56 +408,62 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
   }).join("");
 }
 
-
 async function loadBoards(centerReach = "Shiplake Lock to Marsh Lock") {
-  const row = document.getElementById("boardRow");
-  if (!row) return;
-  row.innerHTML = "<div class='muted'>Loading…</div>";
+  const el = document.getElementById('boardsRow');
+  if (!el) return;
 
+  let data = [];
   try {
-    const res = await fetch("/api/ea/boards", { cache: "no-store" });
-    const itemsRaw = await res.json();
-
-    // Guard against weird shapes
-    const items = (Array.isArray(itemsRaw) ? itemsRaw : [])
-      .filter(r => r && typeof r.reach === "string" && typeof r.status === "string");
-
-    const makeArrow = (trend) =>
-      trend === "increasing" ? "↑" : trend === "decreasing" ? "↓" : "";
-
-    if (!items.length) {
-      row.innerHTML = "<div class='muted'>No board data available right now.</div>";
-      return;
-    }
-
-    row.innerHTML = items.map(r => {
-      const cls = `board ${r.status}`;
-      const arrow = makeArrow(r.trend);
-      const label =
-        r.status === "red" ? "Strong stream" :
-        (r.status === "yellow" && r.trend === "increasing") ? "Stream increasing" :
-        (r.status === "yellow" && r.trend === "decreasing") ? "Stream decreasing" :
-        "No stream warnings";
-
-      const isCenter = r.reach.toLowerCase() === centerReach.toLowerCase();
-      return `
-        <div class="${cls}${isCenter ? " center": ""}" role="listitem" data-reach="${r.reach}">
-          <div class="reach">${r.reach}</div>
-          <div class="status">
-            <span class="badge">${label}</span>
-            ${arrow ? `<span class="arrow">${arrow}</span>` : ``}
-          </div>
-        </div>`;
-    }).join("");
-
-    // Try to center the target reach if present
-    const el = [...row.children].find(div => (div.dataset.reach || "").toLowerCase() === centerReach.toLowerCase());
-    if (el) el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const res = await fetch('/api/ea/boards?ts=' + Date.now(), { cache: 'no-store' });
+    data = await res.json();
+    if (!Array.isArray(data)) data = [];
   } catch (e) {
-    console.error("boards load failed", e);
-    row.innerHTML = "<div class='muted'>Couldn’t load EA boards right now.</div>";
+    console.error('boards load failed', e);
+    el.innerHTML = `<div class="boards-error">Couldn’t retrieve boards info.</div>`;
+    return;
   }
+
+  if (data.length === 0) {
+    el.innerHTML = `<div class="boards-error">No boards data available.</div>`;
+    return;
+  }
+
+  // normalise + safe defaults
+  const rows = data.map(r => ({
+    reach   : String(r.Reach ?? r.reach ?? '').trim(),
+    from    : String(r.FromLock ?? r.from ?? '').trim(),
+    to      : String(r.ToLock ?? r.to ?? '').trim(),
+    status  : String(r.Status ?? r.status ?? 'green').toLowerCase(),
+    trend   : (r.Trend ?? r.trend ?? null)?.toString().toLowerCase() || null
+  }));
+
+  // sort so that the chosen reach is in the middle-ish
+  const idx = Math.max(0, rows.findIndex(r => r.reach.toLowerCase() === centerReach.toLowerCase()));
+  const start = Math.max(0, idx - 4);
+  const end   = Math.min(rows.length, start + 12); // show up to ~12 boxes
+  const view  = rows.slice(start, end);
+
+  const iconFor = (status, trend) => {
+    const arrow = trend === 'increasing' ? '↗' : trend === 'decreasing' ? '↘' : '→';
+    const colourClass = status === 'red' ? 'red' : status === 'yellow' ? 'yellow' : 'green';
+    return { arrow, colourClass };
+  };
+
+  el.innerHTML = view.map(r => {
+    const { arrow, colourClass } = iconFor(r.status, r.trend);
+    const label = r.reach || `${r.from || ''}${r.to ? ' to ' + r.to : ''}` || 'Unknown reach';
+    const title = `${label}\nStatus: ${r.status}${r.trend ? `, ${r.trend}` : ''}`;
+    return `
+      <div class="board ${colourClass}" title="${title}">
+        <div class="reach">${label}</div>
+        <div class="state">
+          <span class="dot"></span>
+          <span class="arrow">${arrow}</span>
+        </div>
+      </div>`;
+  }).join('');
 }
+
 
 
 
