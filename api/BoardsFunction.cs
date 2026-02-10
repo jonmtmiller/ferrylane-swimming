@@ -1,171 +1,216 @@
-// File: api/BoardsFunction.cs
 using System.Net;
-using System.Text.Json;
+using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.Azure.Functions.Worker;
-using Microsoft.Azure.Functions.Worker.Http;
 
-namespace FerryLane.Api;
-
-public class BoardsFunction
+public static class BoardsFunction
 {
-    private static DateTime _cacheAt = DateTime.MinValue;
-    private static List<ReachRow>? _cache;
-
-    private static readonly HttpClient _http = new HttpClient(new HttpClientHandler
-    {
-        AutomaticDecompression = DecompressionMethods.All
+    private static readonly HttpClient Http = new HttpClient(new HttpClientHandler{
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
     })
     {
-        Timeout = TimeSpan.FromSeconds(20)
+        Timeout = TimeSpan.FromSeconds(15)
     };
 
-    [Function("boards")]
+    // GOV.UK + TVM sources
+    private const string GovUk = "https://www.gov.uk/guidance/river-thames-current-river-conditions";
+    private const string Tvm   = "https://www.thamesvisitormoorings.co.uk/river-conditions/";
+
+    [Microsoft.Azure.Functions.Worker.Function("eaBoards")]
     public static async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "ea/boards")]
-        HttpRequestData req,
-        FunctionContext ctx)
+        [Microsoft.Azure.Functions.Worker.HttpTrigger(
+            Microsoft.Azure.Functions.Worker.AuthorizationLevel.Anonymous,
+            "get", Route = "ea/boards")] Microsoft.Azure.Functions.Worker.HttpRequestData req,
+        Microsoft.Azure.Functions.Worker.FunctionContext ctx)
     {
-        // Optional debug: /api/ea/boards?debug=1 returns raw lines we parsed
-        var debug = System.Web.HttpUtility.ParseQueryString(req.Url.Query).Get("debug") == "1";
+        var log = ctx.GetLogger("eaBoards");
 
-        if (!debug && _cache is not null && (DateTime.UtcNow - _cacheAt) < TimeSpan.FromMinutes(10))
-            return JsonOk(req, _cache);
-
-        const string url = "https://www.gov.uk/guidance/river-thames-current-river-conditions";
-        string html;
+        List<Row> rows = new();
         try
         {
-            html = await _http.GetStringAsync(url);
+            var html = await GetString(GovUk);
+            rows = ParseGovUk(html);
+            if (rows.Count < 5) // defensive: if parsing failed or page changed
+            {
+                log.LogWarning("GOV.UK parse yielded {Count} rows; trying TVM fallback.", rows.Count);
+                var html2 = await GetString(Tvm);
+                rows = ParseTvm(html2);
+            }
         }
         catch (Exception ex)
         {
-            var err = req.CreateResponse(HttpStatusCode.BadGateway);
-            await err.WriteStringAsync($"Failed to fetch GOV.UK page: {ex.Message}");
-            return err;
-        }
-
-        var lines = HtmlToCandidateLines(html).ToList();
-
-        if (debug)
-            return JsonOk(req, lines); // help diagnose page changes
-
-        // Regex: "<A> Lock to <B> Lock  <free text>"
-        var re = new Regex(@"(?<from>[A-Za-z’' \-]+?) Lock to (?<to>[A-Za-z’' \-]+?) Lock\s+(?<text>.+)",
-                           RegexOptions.IgnoreCase);
-
-        var rows = new List<ReachRow>();
-        foreach (var line in lines)
-        {
-            var m = re.Match(line);
-            if (!m.Success) continue;
-
-            var from = m.Groups["from"].Value.Trim();
-            var to   = m.Groups["to"].Value.Trim();
-            var text = m.Groups["text"].Value.Trim();
-
-            var (status, trend) = Classify(text);
-
-            rows.Add(new ReachRow
+            log.LogError(ex, "Boards fetch/parse failed; trying TVM fallback.");
+            try
             {
-                Reach   = $"{from} Lock to {to} Lock",
-                FromLock = from,
-                ToLock   = to,
-                Status   = status,
-                Trend    = trend
-            });
+                var html2 = await GetString(Tvm);
+                rows = ParseTvm(html2);
+            }
+            catch (Exception ex2)
+            {
+                log.LogError(ex2, "TVM fallback failed.");
+            }
         }
 
-        // If we somehow got zero, return a friendly minimal payload rather than 200 []
+        // As a last resort, return a neutral row rather than [] so the frontend stays happy
         if (rows.Count == 0)
         {
-            // Return at least a single placeholder so the UI shows a message
-            rows.Add(new ReachRow
+            rows.Add(new Row
             {
-                Reach = "River Thames (boards)",
-                FromLock = "",
-                ToLock = "",
-                Status = "green",
-                Trend = null
+                Reach   = "River Thames (boards)",
+                FromLock= "",
+                ToLock  = "",
+                Status  = "green",
+                Trend   = null
             });
         }
 
-        _cache = rows;
-        _cacheAt = DateTime.UtcNow;
-        return JsonOk(req, rows);
+        var resp = req.CreateResponse(HttpStatusCode.OK);
+        await resp.WriteStringAsync(System.Text.Json.JsonSerializer.Serialize(rows));
+        resp.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        return resp;
     }
 
-    private static (string status, string? trend) Classify(string rawText)
+    private static async Task<string> GetString(string url)
     {
-        var text = rawText.ToLowerInvariant();
-        // Red / strong stream
-        if (text.Contains("red") || text.Contains("strong stream"))
-            return ("red", null);
-
-        // Yellow with trend
-        if (text.Contains("stream increasing"))
-            return ("yellow", "increasing");
-        if (text.Contains("stream decreasing"))
-            return ("yellow", "decreasing");
-
-        // Explicit “no stream warnings” → green
-        if (text.Contains("no stream warnings"))
-            return ("green", null);
-
-        // Generic “caution” without strong-stream phrasing usually maps to yellow (conservative)
-        if (text.Contains("caution"))
-            return ("yellow", null);
-
-        // Default: green
-        return ("green", null);
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (compatible; FerryLane/1.0)");
+        req.Headers.Accept.ParseAdd("text/html,*/*;q=0.8");
+        var res = await Http.SendAsync(req);
+        res.EnsureSuccessStatusCode();
+        var bytes = await res.Content.ReadAsByteArrayAsync();
+        // normalise to UTF-8 text
+        return Encoding.UTF8.GetString(bytes);
     }
 
-    private static IEnumerable<string> HtmlToCandidateLines(string html)
+    // --- GOV.UK parser ---
+    // The page contains a "Current river conditions" section listing reaches like:
+    // "<strong>Shiplake Lock to Marsh Lock</strong>: Red increasing"
+    private static List<Row> ParseGovUk(string html)
     {
-        // 1) remove scripts/styles
-        var s = Regex.Replace(html, @"<script[\s\S]*?</script>", "", RegexOptions.IgnoreCase);
-        s = Regex.Replace(s, @"<style[\s\S]*?</style>", "", RegexOptions.IgnoreCase);
+        var rows = new List<Row>();
 
-        // 2) inject newlines at structural boundaries so list items/paras become lines
-        s = Regex.Replace(s, @"</(li|p|h\d|tr)>", "\n", RegexOptions.IgnoreCase);
-        s = Regex.Replace(s, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+        // narrow to the "Current river conditions" section to reduce false positives
+        var sec = ExtractSection(html, "Current river conditions", "What the warnings mean");
 
-        // 3) strip remaining tags
-        s = Regex.Replace(s, "<.*?>", " ");
+        // match lines like "<strong>Shiplake Lock to Marsh Lock</strong>: Red increasing"
+        var rx = new Regex(
+            @"<strong>\s*([^<]+?)\s*</strong>\s*:\s*([Rr]ed|[Yy]ellow|[Gg]reen)\s*(increasing|decreasing|unchanged)?",
+            RegexOptions.Compiled);
 
-        // 4) decode entities, collapse whitespace
-        s = WebUtility.HtmlDecode(s);
-        s = Regex.Replace(s, @"\s+", " ").Trim();
+        foreach (Match m in rx.Matches(sec))
+        {
+            var reach = WebUtility.HtmlDecode(m.Groups[1].Value.Trim());
+            var status = m.Groups[2].Value.ToLowerInvariant();      // red|yellow|green
+            var trend  = m.Groups[3]?.Success == true ? m.Groups[3].Value.ToLowerInvariant() : null;
 
-        // 5) split by our injected newlines (they might have been lost by step 3 for unmatched tags,
-        //    so also split by ". " as a backup to give more candidate chunks).
-        var primary = s.Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0);
-        var expanded = primary.SelectMany(line =>
-            line.Contains(" Lock to ", StringComparison.OrdinalIgnoreCase)
-                ? new[] { line }
-                : line.Split(new[] { ". " }, StringSplitOptions.None).Select(y => y.Trim())
-        );
+            SplitReach(reach, out var from, out var to);
 
-        // 6) keep lines that clearly reference a reach
-        return expanded
-            .Where(x => x.IndexOf(" Lock to ", StringComparison.OrdinalIgnoreCase) >= 0)
-            .Where(x => x.Length <= 320); // be generous
+            rows.Add(new Row
+            {
+                Reach   = reach,
+                FromLock= from,
+                ToLock  = to,
+                Status  = status,     // red|yellow|green
+                Trend   = trend       // increasing|decreasing|unchanged|null
+            });
+        }
+
+        return rows;
     }
 
-    private static HttpResponseData JsonOk(HttpRequestData req, object o)
+    // --- TVM fallback parser ---
+    // Structure appears as H3 reach lines and following text "Red caution: strong stream"
+    private static List<Row> ParseTvm(string html)
     {
-        var res = req.CreateResponse(HttpStatusCode.OK);
-        res.Headers.Add("Content-Type", "application/json; charset=utf-8");
-        res.WriteString(JsonSerializer.Serialize(o));
-        return res;
+        var rows = new List<Row>();
+
+        // Grab only the main article content area
+        var main = ExtractSection(html, "> River Thames - River Conditions", "### Thames Visitor Moorings");
+        if (string.IsNullOrWhiteSpace(main)) main = html;
+
+        // Reach lines like "### Shiplake Lock to Marsh Lock"
+        var reachRx = new Regex(@"<h3[^>]*>\s*(.*?)\s*</h3>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // The following status text often appears as a <p> right after h3 (e.g., "Red caution: strong stream")
+        var pRx = new Regex(@"</h3>\s*<p[^>]*>\s*([^<]+)\s*</p>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        foreach (Match m in reachRx.Matches(main))
+        {
+            var start = m.Index;
+            var tail = main.Substring(start, Math.Min(main.Length - start, 600)); // look ahead
+            var p = pRx.Match(tail);
+            var reach = WebUtility.HtmlDecode(m.Groups[1].Value.Trim());
+            string status = "green";
+            string? trend = null;
+
+            if (p.Success)
+            {
+                var txt = WebUtility.HtmlDecode(p.Groups[1].Value.Trim()).ToLowerInvariant();
+                if (txt.Contains("red")) status = "red";
+                else if (txt.Contains("yellow")) status = "yellow";
+                else status = "green";
+
+                if (txt.Contains("increasing")) trend = "increasing";
+                else if (txt.Contains("decreasing")) trend = "decreasing";
+                else if (txt.Contains("strong stream")) trend = null; // not specified
+            }
+
+            SplitReach(reach, out var from, out var to);
+
+            rows.Add(new Row
+            {
+                Reach   = reach,
+                FromLock= from,
+                ToLock  = to,
+                Status  = status,
+                Trend   = trend
+            });
+        }
+
+        return rows;
     }
 
-    private record ReachRow
+    private static string ExtractSection(string html, string fromHeadingText, string toHeadingText)
+    {
+        // make a plain-text-ish copy to robustly find headings
+        var normalized = Regex.Replace(html, @"\s+", " ");
+        int i1 = IndexOfHeading(normalized, fromHeadingText);
+        if (i1 < 0) return html;
+        int i2 = IndexOfHeading(normalized, toHeadingText);
+        if (i2 < 0 || i2 <= i1) i2 = Math.Min(normalized.Length, i1 + 200000);
+        return normalized.Substring(i1, i2 - i1);
+    }
+
+    private static int IndexOfHeading(string html, string headingText)
+    {
+        // match either an H2 with text or an anchor in a contents list
+        var rx = new Regex($@"(<h2[^>]*>\s*{Regex.Escape(headingText)}\s*</h2>|>{Regex.Escape(headingText)}<)",
+            RegexOptions.IgnoreCase);
+        var m = rx.Match(html);
+        return m.Success ? m.Index : -1;
+    }
+
+    private static void SplitReach(string reach, out string from, out string to)
+    {
+        from = ""; to = "";
+        if (string.IsNullOrWhiteSpace(reach)) return;
+        var parts = reach.Split(" to ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2)
+        {
+            from = parts[0].Replace(" Lock", "", StringComparison.OrdinalIgnoreCase);
+            to   = parts[1].Replace(" Lock", "", StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            // e.g. "Upstream of St John's Lock" or "Downstream of X"
+            from = reach;
+        }
+    }
+
+    private class Row
     {
         public string Reach { get; set; } = "";
         public string FromLock { get; set; } = "";
         public string ToLock { get; set; } = "";
-        public string Status { get; set; } = "";
-        public string? Trend { get; set; }
+        public string Status { get; set; } = "green";       // red|yellow|green
+        public string? Trend { get; set; }                   // increasing|decreasing|unchanged|null
     }
 }
