@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
 
 namespace FerryLane.Api;
 
