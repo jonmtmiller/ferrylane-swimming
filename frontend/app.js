@@ -304,18 +304,37 @@ async function loadEDM() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const item = (json.items && json.items[0]) || json[0] || json;
-    if (!item) { $('edmStatus').textContent = 'No data'; return; }
+    if (!item) { 
+      $('edmStatus').textContent = 'No data'; 
+      window._sewageActive = false;
+      window.dispatchEvent(new CustomEvent('edm-change', { detail: { active: false }}));
+      return; 
+    }
+
     const status = item.AlertStatus || item.alertStatus || item.status || '—';
-    const start = item.MostRecentDischargeAlertStart || item.startTime || item.LastStart || item.lastStart;
-    const stop  = item.MostRecentDischargeAlertStop  || item.stopTime  || item.LastStop  || item.lastStop;
+    const start  = item.MostRecentDischargeAlertStart || item.startTime || item.LastStart || item.lastStart;
+    const stop   = item.MostRecentDischargeAlertStop  || item.stopTime  || item.LastStop  || item.lastStop;
+
     $('edmStatus').textContent = String(status).toUpperCase();
-    if (start && !stop) $('sewageCard').classList.add('alert');
+    const active = !!(start && !stop);
+    if (active) $('sewageCard').classList.add('alert'); else $('sewageCard').classList.remove('alert');
     $('edmDetail').textContent = start
-      ? (stop ? `Last event ended ${new Date(stop).toLocaleString()}` 
+      ? (stop ? `Last event ended ${new Date(stop).toLocaleString()}`
               : `Event started ${new Date(start).toLocaleString()}`)
       : 'No recent event info';
-  } catch(e){ console.error('EDM load failed', e); $('edmStatus').textContent='Unavailable'; $('edmDetail').textContent='Check later'; }
+
+    // <-- expose a flag + notify listeners (snow engine will restart)
+    window._sewageActive = active;
+    window.dispatchEvent(new CustomEvent('edm-change', { detail: { active }}));
+  } catch (e) {
+    console.error('EDM load failed', e);
+    $('edmStatus').textContent = 'Unavailable';
+    $('edmDetail').textContent = 'Check later';
+    window._sewageActive = false;
+    window.dispatchEvent(new CustomEvent('edm-change', { detail: { active: false }}));
+  }
 }
+
 
 /* ========= Weather (Met Office proxy) ========= */
 async function loadWeather(lat = 51.50144, lon = -0.870961) {
@@ -530,17 +549,17 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 
-
-/* ========= Seasonal effects (Christmas + Snow + 💩 easter egg) =========
+/* ========= Seasonal effects (Christmas + Snow + 💩 + 🥞) =========
    Christmas theme: ON 1 Dec – 1 Jan (inclusive), hidden otherwise.
    Snow: visible Dec–Feb; default ON in Dec, OFF in Jan–Feb (remember choice in localStorage per winter).
-   Easter egg: triple-click “Snow” within 7s → 💩 mode; stored in sessionStorage for this tab.
-======================================================================= */
+   💩: if sewage is actively discharging at Wargrave, use poo emoji instead of dots.
+   🥞: Pancake Day override (example uses 2026-02-17).
+================================================================== */
 (function seasonalEffects() {
   const TZ = "Europe/London";
   const root = document.documentElement;
 
-  // --- robust UK date parts ---
+  // --- UK date helpers ---
   function ukParts(dUtc = new Date()) {
     const parts = new Intl.DateTimeFormat("en-GB", {
       timeZone: TZ, year: "numeric", month: "numeric", day: "numeric"
@@ -548,12 +567,30 @@ window.addEventListener('DOMContentLoaded', () => {
     return { y: +parts.year, m: +parts.month, d: +parts.day };
   }
 
-  // --- seasonal windows ---
+  // Windows
   function inChristmasWindow() { const { m, d } = ukParts(); return (m === 12 && d >= 1) || (m === 1 && d === 1); }
-  function inSnowSeason() { const { m } = ukParts(); return m === 12 || m === 1 || m === 2; }
-  function inJanFeb() { const { m } = ukParts(); return m === 1 || m === 2; }
+  function inSnowSeason()     { const { m } = ukParts();     return m === 12 || m === 1 || m === 2; }
+  function inJanFeb()         { const { m } = ukParts();     return m === 1 || m === 2; }
 
-  // --- elements ---
+  // Example Pancake Day (Shrove Tuesday) — here we lock to 2026-02-17.
+  // In future we can compute movable feasts, or maintain a small per-year table.
+  function isPancakeDay(dUtc = new Date()) {
+    const uk = new Date(dUtc.toLocaleString("en-GB", { timeZone: TZ }));
+    const y = uk.getFullYear(), m = uk.getMonth()+1, d = uk.getDate();
+    return y === 2026 && m === 2 && d === 17;
+  }
+
+  // Core chooser: decide which emoji to render today.
+  // Priority: Pancakes > (pooMode OR sewageActive) > none (dots)
+  function getEmojiForDate(opts = {}) {
+    const { overrideEmoji, sewageActive, pooMode } = opts;
+    if (overrideEmoji) return overrideEmoji;              // manual test via window._flakeEmoji
+    if (isPancakeDay()) return "🥞";
+    if (pooMode || sewageActive) return "💩";
+    return null; // null => draw white dots
+  }
+
+  // Elements
   let btn = document.getElementById("snow-toggle");
   let cnv = document.getElementById("snow-canvas");
   if (!btn) {
@@ -571,103 +608,101 @@ window.addEventListener('DOMContentLoaded', () => {
     document.body.appendChild(cnv);
   }
 
-  // --- snow engine state ---
+  // State
   let rafId = null;
-  let onResize = null;
-  let pooMode = false; // easter egg (session only)
+  let resizeHandler = null;
+  let flakes = [];
+  let DPR = 1;
+  let pooMode = false; // session easter egg
 
-  try {
-    pooMode = sessionStorage.getItem("pooMode") === "1";
-  } catch {}
+  try { pooMode = sessionStorage.getItem("pooMode") === "1"; } catch {}
 
   function savePoo(v) {
     pooMode = !!v;
     try { sessionStorage.setItem("pooMode", pooMode ? "1" : "0"); } catch {}
   }
 
-
-  // Europe/London "today only" — set to 2026-02-17
-function isPancakeDay(dUtc = new Date()) {
-  const uk = new Date(dUtc.toLocaleString("en-GB", { timeZone: "Europe/London" }));
-  const y = uk.getFullYear(), m = uk.getMonth()+1, d = uk.getDate();
-  return y === 2026 && m === 2 && d === 17;  // adjust if you ever want a different day
-}
-
-  // --- draw helpers ---
-  function startSnow(canvas) {
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { stopSnow = () => {}; return; }
-  const ctx = canvas.getContext("2d");
-  let w, h, flakes = [], rafId;
-  const DPR = Math.min(window.devicePixelRatio || 1, 2);
-
-  function resize(){
-    w = canvas.width  = Math.floor(window.innerWidth  * DPR);
-    h = canvas.height = Math.floor(window.innerHeight * DPR);
-  }
-  resize(); window.addEventListener("resize", resize);
-
-  // Choose what to draw: 🥞 just for today, else default circles (or a global override if you set one)
-  // You can still force other emoji by setting window._flakeEmoji = "💩" etc. Pancakes override for today.
-  const emojiForToday = isPancakeDay() ? "🥞" : (window._flakeEmoji || null);
-
-  const N = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60;
-  for (let i=0;i<N;i++) flakes.push({
-    x: Math.random()*w, y: Math.random()*h,
-    r: 0.7+Math.random()*2.2, s: 0.4+Math.random()*0.9,
-    a: Math.random()*Math.PI*2, drift: 0.3+Math.random()*0.7, o: 0.5+Math.random()*0.5
-  });
-
-  function tick(){
-    ctx.clearRect(0,0,w,h);
-    ctx.globalCompositeOperation = "source-over";
-
-    if (emojiForToday) {
-      // Emoji “flakes”
-      ctx.textBaseline = "middle";
-      // Size emojis roughly like our snow dots (scale by radius)
-      for (const f of flakes){
-        f.y += f.s * DPR;
-        f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
-        if (f.y > h + 12) { f.y = -12; f.x = Math.random()*w; }
-        if (f.x < -12) f.x = w + 12; else if (f.x > w + 12) f.x = -12;
-
-        const px = Math.max(10, Math.min(22, f.r * 8)) * DPR; // visual size clamp
-        ctx.font = `${px}px system-ui, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji`;
-        ctx.globalAlpha = Math.min(1, 0.6 + f.o * 0.4); // keep subtle
-        ctx.fillText(emojiForToday, f.x, f.y);
-      }
-    } else {
-      // Default white dot flakes
-      ctx.fillStyle = "#fff";
-      ctx.globalCompositeOperation = "lighter";
-      for (const f of flakes){
-        f.y += f.s * DPR;
-        f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
-        if (f.y > h + 5) { f.y = -10; f.x = Math.random()*w; }
-        if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
-        ctx.globalAlpha = f.o;
-        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI*2); ctx.fill();
-      }
+  // Draw engine: creates flakes and animates them.
+  function buildFlakes(w, h) {
+    const N = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60;
+    const arr = [];
+    for (let i = 0; i < N; i++) {
+      arr.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        r: 0.7 + Math.random() * 2.2,
+        s: 0.4 + Math.random() * 0.9,
+        a: Math.random() * Math.PI * 2,
+        drift: 0.3 + Math.random() * 0.7,
+        o: 0.5 + Math.random() * 0.5
+      });
     }
-    rafId = requestAnimationFrame(tick);
+    return arr;
   }
-  tick();
 
-  stopSnow = () => {
-    cancelAnimationFrame(rafId);
-    window.removeEventListener("resize", resize);
-  };
-}
+  function startSnow(canvas) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
+    const ctx = canvas.getContext("2d");
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+    function resize() {
+      canvas.width  = Math.floor(window.innerWidth  * DPR);
+      canvas.height = Math.floor(window.innerHeight * DPR);
+      flakes = buildFlakes(canvas.width, canvas.height);
+    }
+    resize();
+    resizeHandler = () => resize();
+    window.addEventListener("resize", resizeHandler);
+
+    // Decide which symbol to use right now
+    const emoji = getEmojiForDate({
+      overrideEmoji: window._flakeEmoji || null,
+      sewageActive : !!window._sewageActive,
+      pooMode
+    });
+
+    function tick() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (emoji) {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.textBaseline = "middle";
+        for (const f of flakes) {
+          f.y += f.s * DPR;
+          f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
+          if (f.y > canvas.height + 12) { f.y = -12; f.x = Math.random() * canvas.width; }
+          if (f.x < -12) f.x = canvas.width + 12; else if (f.x > canvas.width + 12) f.x = -12;
+
+          const px = Math.max(10, Math.min(22, f.r * 8)) * DPR; // emoji-ish size
+          ctx.font = `${px}px system-ui, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji`;
+          ctx.globalAlpha = Math.min(1, 0.6 + f.o * 0.4);
+          ctx.fillText(emoji, f.x, f.y);
+        }
+      } else {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = "#fff";
+        for (const f of flakes) {
+          f.y += f.s * DPR;
+          f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
+          if (f.y > canvas.height + 5) { f.y = -10; f.x = Math.random() * canvas.width; }
+          if (f.x < -5) f.x = canvas.width + 5; else if (f.x > canvas.width + 5) f.x = -5;
+          ctx.globalAlpha = f.o;
+          ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+    tick();
+  }
 
   function stopSnow(canvas) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    if (onResize) { window.removeEventListener("resize", onResize); onResize = null; }
+    if (resizeHandler) { window.removeEventListener("resize", resizeHandler); resizeHandler = null; }
     const ctx = canvas.getContext("2d");
     ctx && ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 
-  // --- theme + snow control ---
   function enableChristmasTheme(on) {
     if (on) {
       root.classList.add("christmas");
@@ -679,19 +714,18 @@ function isPancakeDay(dUtc = new Date()) {
 
   function setSnow(on) {
     btn.dataset.on = on ? "1" : "";
-    // show 💩 only when easter egg active AND snow visible AND on
-    const label = pooMode && !btn.hidden && on ? "Snow: on 💩" : on ? "Snow: on" : "Snow: off";
-    btn.textContent = label;
+    const labelIcon = (pooMode || window._sewageActive) && on ? " 💩" : "";
+    btn.textContent = on ? ("Snow: on" + labelIcon) : "Snow: off";
     if (on) startSnow(cnv); else stopSnow(cnv);
   }
 
-  // --- localStorage key for Jan–Feb preference ---
+  // localStorage key (remember Jan–Feb only)
   function snowPrefKey() {
     const { y } = ukParts();
     return `snowPref-${y}`;
   }
 
-  // --- initialise per season ---
+  // Initial season setup
   const xmas = inChristmasWindow();
   const snowWindow = inSnowSeason();
   const janFeb = inJanFeb();
@@ -701,49 +735,51 @@ function isPancakeDay(dUtc = new Date()) {
 
   let snowOn;
   if (xmas) {
-    snowOn = true;
+    snowOn = true;                         // default ON in December (and New Year’s Day)
   } else if (janFeb) {
     let stored = null;
     try { stored = localStorage.getItem(snowPrefKey()); } catch {}
-    snowOn = stored ? stored === 'on' : false;
+    snowOn = stored ? stored === 'on' : false;  // default OFF in Jan–Feb, remember choice
   } else {
-    snowOn = false;
+    snowOn = false;                        // outside winter, hide/keep off
   }
   setSnow(snowOn);
 
-  // --- easter egg triple-click detection (3 toggles in <= 7s) ---
+  // Toggle + remember
   const CLICK_WINDOW_MS = 7000;
   const clicks = [];
-
   btn.addEventListener("click", () => {
-    // actual on/off toggle
     const next = !(btn.dataset.on === "1");
     setSnow(next);
 
-    // remember Jan–Feb choice
     if (janFeb) {
       try { localStorage.setItem(snowPrefKey(), next ? 'on' : 'off'); } catch {}
     } else {
       try { localStorage.removeItem(snowPrefKey()); } catch {}
     }
 
-    // record click time & prune
+    // Easter egg: triple click within 7s toggles 💩 mode (session)
     const now = Date.now();
     clicks.push(now);
     while (clicks.length && now - clicks[0] > CLICK_WINDOW_MS) clicks.shift();
-
-    // 3 clicks within window? toggle poo mode and restart animation to apply density change
     if (clicks.length >= 3) {
-      savePoo(!pooMode);            // flip mode
-      clicks.length = 0;            // reset
-      if (btn.dataset.on === "1") { // if currently running, restart to rebuild flakes
-        stopSnow(cnv);
-        setSnow(true);
-      } else {
-        // update label to show the 💩 hint even when off
-        btn.textContent = pooMode ? "Snow: off 💩" : "Snow: off";
-      }
+      savePoo(!pooMode);
+      clicks.length = 0;
+      if (btn.dataset.on === "1") { stopSnow(cnv); setSnow(true); }
+      else btn.textContent = pooMode ? "Snow: off 💩" : "Snow: off";
     }
   });
 
+  // React to sewage status changes -> restart animation to switch emoji immediately
+  window.addEventListener('edm-change', () => {
+    if (btn.dataset.on === "1") { stopSnow(cnv); setSnow(true); }
+    else setSnow(false);
+  });
+
+  // Optional debug helpers (safe to leave)
+  Object.assign(window, {
+    _forceEmoji(e) { window._flakeEmoji = e; if (btn.dataset.on === "1") { stopSnow(cnv); setSnow(true); } },
+    _ukNow() { return new Date().toLocaleString("en-GB", { timeZone: TZ }); }
+  });
 })();
+
