@@ -585,86 +585,80 @@ window.addEventListener('DOMContentLoaded', () => {
     try { sessionStorage.setItem("pooMode", pooMode ? "1" : "0"); } catch {}
   }
 
+
+  // Europe/London "today only" — set to 2026-02-17
+function isPancakeDay(dUtc = new Date()) {
+  const uk = new Date(dUtc.toLocaleString("en-GB", { timeZone: "Europe/London" }));
+  const y = uk.getFullYear(), m = uk.getMonth()+1, d = uk.getDate();
+  return y === 2026 && m === 2 && d === 17;  // adjust if you ever want a different day
+}
+
   // --- draw helpers ---
   function startSnow(canvas) {
-    if (rafId) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { stopSnow = () => {}; return; }
+  const ctx = canvas.getContext("2d");
+  let w, h, flakes = [], rafId;
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
 
-    const ctx = canvas.getContext("2d");
-    const DPR = Math.min(window.devicePixelRatio || 1, 2);
-    let w = 0, h = 0, flakes = [];
-
-    function resize() {
-      w = canvas.width  = Math.floor(window.innerWidth  * DPR);
-      h = canvas.height = Math.floor(window.innerHeight * DPR);
-      // perf: fewer particles if using emoji (heavier than circles)
-      const density = pooMode ? 28000 : 18000;
-      const base = pooMode ? 44 : 60;
-      const N = Math.floor((window.innerWidth * window.innerHeight) / density) + base;
-
-      flakes = [];
-      for (let i = 0; i < N; i++) {
-        flakes.push({
-          x: Math.random() * w,
-          y: Math.random() * h,
-          r: 0.9 + Math.random() * 1.8,           // “size”
-          s: 0.45 + Math.random() * 0.9,          // fall speed
-          a: Math.random() * Math.PI * 2,         // phase
-          drift: 0.3 + Math.random() * 0.7,       // side-to-side
-          o: 0.55 + Math.random() * 0.45,         // opacity
-          spin: (Math.random() * 0.8 - 0.4) * 0.02
-        });
-      }
-    }
-
-    resize();
-    onResize = () => resize();
-    window.addEventListener("resize", onResize);
-
-    function drawCircle(f) {
-      ctx.globalAlpha = f.o;
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, f.r * DPR * 1.3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    function drawPoo(f) {
-      // render small emoji with gentle rotation
-      const px = 22 * f.r * DPR; // emoji size (tweakable)
-      ctx.save();
-      ctx.globalAlpha = Math.min(0.95, f.o + 0.1);
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.font = `${px}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"`;
-      ctx.translate(f.x, f.y);
-      ctx.rotate(f.a * 0.15);
-      ctx.fillText("💩", 0, 0);
-      ctx.restore();
-    }
-
-    function tick() {
-      ctx.clearRect(0, 0, w, h);
-      ctx.globalCompositeOperation = pooMode ? "source-over" : "lighter";
-
-      for (const f of flakes) {
-        // motion
-        f.y += f.s * DPR;
-        f.x += Math.cos((f.a += 0.01)) * f.drift * DPR;
-        f.a += f.spin;
-
-        // wrap
-        if (f.y > h + 5) { f.y = -10; f.x = Math.random() * w; }
-        if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
-
-        // draw
-        if (pooMode) drawPoo(f); else drawCircle(f);
-      }
-      rafId = requestAnimationFrame(tick);
-    }
-
-    tick();
+  function resize(){
+    w = canvas.width  = Math.floor(window.innerWidth  * DPR);
+    h = canvas.height = Math.floor(window.innerHeight * DPR);
   }
+  resize(); window.addEventListener("resize", resize);
+
+  // Choose what to draw: 🥞 just for today, else default circles (or a global override if you set one)
+  // You can still force other emoji by setting window._flakeEmoji = "💩" etc. Pancakes override for today.
+  const emojiForToday = isPancakeDay() ? "🥞" : (window._flakeEmoji || null);
+
+  const N = Math.floor((window.innerWidth * window.innerHeight) / 18000) + 60;
+  for (let i=0;i<N;i++) flakes.push({
+    x: Math.random()*w, y: Math.random()*h,
+    r: 0.7+Math.random()*2.2, s: 0.4+Math.random()*0.9,
+    a: Math.random()*Math.PI*2, drift: 0.3+Math.random()*0.7, o: 0.5+Math.random()*0.5
+  });
+
+  function tick(){
+    ctx.clearRect(0,0,w,h);
+    ctx.globalCompositeOperation = "source-over";
+
+    if (emojiForToday) {
+      // Emoji “flakes”
+      ctx.textBaseline = "middle";
+      // Size emojis roughly like our snow dots (scale by radius)
+      for (const f of flakes){
+        f.y += f.s * DPR;
+        f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
+        if (f.y > h + 12) { f.y = -12; f.x = Math.random()*w; }
+        if (f.x < -12) f.x = w + 12; else if (f.x > w + 12) f.x = -12;
+
+        const px = Math.max(10, Math.min(22, f.r * 8)) * DPR; // visual size clamp
+        ctx.font = `${px}px system-ui, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji`;
+        ctx.globalAlpha = Math.min(1, 0.6 + f.o * 0.4); // keep subtle
+        ctx.fillText(emojiForToday, f.x, f.y);
+      }
+    } else {
+      // Default white dot flakes
+      ctx.fillStyle = "#fff";
+      ctx.globalCompositeOperation = "lighter";
+      for (const f of flakes){
+        f.y += f.s * DPR;
+        f.x += Math.cos(f.a += 0.01) * f.drift * DPR;
+        if (f.y > h + 5) { f.y = -10; f.x = Math.random()*w; }
+        if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
+        ctx.globalAlpha = f.o;
+        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * DPR, 0, Math.PI*2); ctx.fill();
+      }
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+  tick();
+
+  stopSnow = () => {
+    cancelAnimationFrame(rafId);
+    window.removeEventListener("resize", resize);
+  };
+}
+
 
   function stopSnow(canvas) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
