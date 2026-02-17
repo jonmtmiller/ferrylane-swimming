@@ -735,7 +735,7 @@ console.info('[snow] choice', {
 
   function setSnow(on) {
     btn.dataset.on = on ? "1" : "";
-    const labelIcon = (pooMode || window._sewageActive) && on ? " 💩" : "";
+    const labelIcon = (pooMode || window._sewageActive) && on ? "" : ""; // This used to have a 💩 when on
     btn.textContent = on ? ("Snow: on" + labelIcon) : "Snow: off";
     if (on) startSnow(cnv); else stopSnow(cnv);
   }
