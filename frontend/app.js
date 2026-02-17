@@ -574,18 +574,29 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Example Pancake Day (Shrove Tuesday) — here we lock to 2026-02-17.
   // In future we can compute movable feasts, or maintain a small per-year table.
-  function isPancakeDay(dUtc = new Date()) {
+
+  //THIS ONE NO LONGER USED!
+  function isPancakeDayOLDONE(dUtc = new Date()) {
     const uk = new Date(dUtc.toLocaleString("en-GB", { timeZone: TZ }));
     const y = uk.getFullYear(), m = uk.getMonth()+1, d = uk.getDate();
     return y === 2026 && m === 2 && d === 17;
   }
+
+  function isPancakeDayUK(dUtc = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric", month: "numeric", day: "numeric"
+  }).formatToParts(dUtc).reduce((o, p) => (p.type !== "literal" ? (o[p.type] = +p.value, o) : o), {});
+  return (parts.year === 2026 && parts.month === 2 && parts.day === 17);
+}
+
 
   // Core chooser: decide which emoji to render today.
   // Priority: Pancakes > (pooMode OR sewageActive) > none (dots)
   function getEmojiForDate(opts = {}) {
     const { overrideEmoji, sewageActive, pooMode } = opts;
     if (overrideEmoji) return overrideEmoji;              // manual test via window._flakeEmoji
-    if (isPancakeDay()) return "🥞";
+    if (isPancakeDayUK()) return "🥞";
     if (pooMode || sewageActive) return "💩";
     return null; // null => draw white dots
   }
@@ -657,10 +668,20 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Decide which symbol to use right now
     const emoji = getEmojiForDate({
-      overrideEmoji: window._flakeEmoji || null,
-      sewageActive : !!window._sewageActive,
-      pooMode
-    });
+  overrideEmoji: window._flakeEmoji || null,
+  sewageActive : !!window._sewageActive,
+  pooMode
+});
+
+// DEBUG: log exactly why we chose what we chose
+console.info('[snow] choice', {
+  emoji,
+  pooMode,
+  sewageActive: !!window._sewageActive,
+  overrideEmoji: window._flakeEmoji ?? null,
+  ukNow: new Date().toLocaleString('en-GB', { timeZone: TZ })
+});
+
 
     function tick() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
