@@ -427,9 +427,26 @@ async function loadWeather(lat = 51.50144, lon = -0.870961) {
   }).join("");
 }
 
+
 async function loadBoards(centerReach = "Shiplake Lock to Marsh Lock") {
   const el = document.getElementById('boardsRow');
   if (!el) return;
+
+  // Helpers
+  const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  const cleanLabel = (s) => (s || "").replace(/\s*Lock\b/gi, "").trim();
+  const reachKey = (s) => (s || "")
+      .toLowerCase()
+      .replace(/\s*lock\b/g, "")     // drop 'lock'
+      .replace(/[^\w]+/g, " ")       // collapse punctuation/dashes
+      .trim();
+
+  const statusPhrase = (status, trend) => {
+    const base = status === "red" ? "Strong stream"
+               : status === "yellow" ? "Caution stream"
+               : "Normal";
+    return trend ? `${base} · ${trend}` : base;
+  };
 
   let data = [];
   try {
@@ -442,25 +459,44 @@ async function loadBoards(centerReach = "Shiplake Lock to Marsh Lock") {
     return;
   }
 
-  if (data.length === 0) {
+  if (!data.length) {
     el.innerHTML = `<div class="boards-error">No boards data available.</div>`;
     return;
   }
 
-  // normalise + safe defaults
-  const rows = data.map(r => ({
-    reach   : String(r.Reach ?? r.reach ?? '').trim(),
-    from    : String(r.FromLock ?? r.from ?? '').trim(),
-    to      : String(r.ToLock ?? r.to ?? '').trim(),
-    status  : String(r.Status ?? r.status ?? 'green').toLowerCase(),
-    trend   : (r.Trend ?? r.trend ?? null)?.toString().toLowerCase() || null
-  }));
+  // Normalise rows
+  const rows = data.map(r => {
+    const reach = String(r.Reach ?? r.reach ?? '').trim();
+    const from  = String(r.FromLock ?? r.from ?? '').trim();
+    const to    = String(r.ToLock ?? r.to ?? '').trim();
+    const status= String(r.Status ?? r.status ?? 'green').toLowerCase();
+    const trend = (r.Trend ?? r.trend ?? null)?.toString().toLowerCase() || null;
+    return { reach, from, to, status, trend };
+  });
 
-  // sort so that the chosen reach is in the middle-ish
-  const idx = Math.max(0, rows.findIndex(r => r.reach.toLowerCase() === centerReach.toLowerCase()));
-  const start = Math.max(0, idx - 4);
-  const end   = Math.min(rows.length, start + 12); // show up to ~12 boxes
-  const view  = rows.slice(start, end);
+  // Find index of the centre reach with tolerant matching
+  const wantKey = reachKey(centerReach);
+  let idx = rows.findIndex(r => reachKey(r.reach) === wantKey);
+
+  if (idx < 0) {
+    // Try matching by From/To pair
+    idx = rows.findIndex(r => reachKey(`${r.from} to ${r.to}`) === wantKey);
+  }
+  if (idx < 0) {
+    // Fuzzy: allow either end to match (still ignoring "lock")
+    idx = rows.findIndex(r => {
+      const k = reachKey(r.reach);
+      return k.includes(reachKey("Shiplake")) && k.includes(reachKey("Marsh"));
+    });
+  }
+
+  // Choose window around the target; fall back to the first slice if no match
+  const total = rows.length;
+  const windowSize = Math.min(12, total);        // up to ~12 boxes
+  let start = Math.max(0, (idx >= 0 ? idx - Math.floor(windowSize/2) : 0));
+  if (start + windowSize > total) start = Math.max(0, total - windowSize);
+
+  const view = rows.slice(start, start + windowSize);
 
   const iconFor = (status, trend) => {
     const arrow = trend === 'increasing' ? '↗' : trend === 'decreasing' ? '↘' : '→';
@@ -470,18 +506,28 @@ async function loadBoards(centerReach = "Shiplake Lock to Marsh Lock") {
 
   el.innerHTML = view.map(r => {
     const { arrow, colourClass } = iconFor(r.status, r.trend);
-    const label = r.reach || `${r.from || ''}${r.to ? ' to ' + r.to : ''}` || 'Unknown reach';
+    // Clean visible label: remove 'Lock'
+    const label = r.reach
+      ? cleanLabel(r.reach)
+      : [cleanLabel(r.from), cleanLabel(r.to)].filter(Boolean).join(' to ') || 'Unknown reach';
+
+    const desc = cap(statusPhrase(r.status, r.trend));
     const title = `${label}\nStatus: ${r.status}${r.trend ? `, ${r.trend}` : ''}`;
+
     return `
-      <div class="board ${colourClass}" title="${title}">
+      <div class="board ${colourClass}" role="listitem" title="${title}">
         <div class="reach">${label}</div>
+        <div class="desc">${desc}</div>
         <div class="state">
           <span class="dot"></span>
           <span class="arrow">${arrow}</span>
         </div>
       </div>`;
   }).join('');
+
+  console.info('[boards] centred at index', idx, 'showing', view.length, 'tiles');
 }
+
 
 
 
@@ -526,6 +572,18 @@ window.addEventListener('DOMContentLoaded', () => {
       const isCollapsed = card.classList.toggle('collapsed');
       toggle.setAttribute('aria-expanded', String(!isCollapsed));
       toggle.textContent = isCollapsed ? 'Show forecast ▾' : 'Hide forecast ▴';
+    });
+  }
+
+  // Boards collapse toggle
+  const boardsCard = document.querySelector('.boards-card');
+  const boardsTog  = document.getElementById('boards-toggle');
+  if (boardsCard && boardsTog) {
+    boardsCard.classList.add('collapsed');
+    boardsTog.addEventListener('click', () => {
+      const isCollapsed = boardsCard.classList.toggle('collapsed');
+      boardsTog.setAttribute('aria-expanded', String(!isCollapsed));
+      boardsTog.textContent = isCollapsed ? 'Show boards ▾' : 'Hide boards ▴';
     });
   }
 
