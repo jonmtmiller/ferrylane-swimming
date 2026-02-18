@@ -109,30 +109,51 @@ a { color: var(--accent); }
 #santa-hat.hat { transform: rotate(-18deg) scaleY(1.10); }
 
 
-.board-row {
+/* Boards row layout */
+.boards-card { margin-top: 1rem; }
+.boards-row {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: .5rem;
-  overflow-x: auto;
-  padding: .5rem .25rem;
-  scroll-snap-type: x mandatory;
+  align-items: stretch;
 }
-.board {
-  scroll-snap-align: center;
-  border-radius: .6rem;
-  padding: .5rem .75rem;
-  min-width: 12rem;
-  line-height: 1.25;
-  border: 1px solid var(--border,#e2e8f0);
-  background: #fff;
-}
-.board .reach { font-weight: 600; }
-.board .badge { font: 600 .85rem/1 system-ui; padding: .1rem .4rem; border-radius: .4rem; }
-.board.green  { border-color: #94d3a2; background: #effaf1; }
-.board.yellow { border-color: #f2c97d; background: #fff7e6; }
-.board.red    { border-color: #f29a9a; background: #fff0f0; }
-.board .status { display:flex; gap:.4rem; align-items:center; margin-top:.25rem; }
-.board .arrow { font-size: 1rem; }
-.board .center { outline: 2px dashed #94a3b8; outline-offset:2px; }
 
+/* Each board tile */
+.board {
+  border-radius: .75rem;
+  padding: .5rem .65rem .6rem;
+  background: var(--card-bg, #111);
+  color: var(--fg, #fff);
+  border: 1px solid rgba(255,255,255,.08);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: .35rem;
+}
+.board .reach {
+  font-weight: 600;
+  line-height: 1.2;
+}
+.board .state {
+  display: flex; align-items: center; gap: .5rem; margin-top: .15rem;
+}
+.board .state .dot {
+  width: .85rem; height: .85rem; border-radius: 999px; background: currentColor;
+}
+
+/* Colour coding */
+.board.green  { color: #27c24c; border-color: rgba(39,194,76,.25); }
+.board.yellow { color: #ffc351; border-color: rgba(255,195,81,.25); }
+.board.red    { color: #ff6b6b; border-color: rgba(255,107,107,.25); }
+
+/* Fallback / error */
+.boards-error {
+  padding: .75rem 1rem;
+  border-radius: .5rem;
+  background: rgba(255,255,255,.06);
+  color: #bbb;
+}
+
+/* Small screens: a bit tighter */
+@media (max-width: 420px) {
+  .boards-row { grid-template-columns: 1fr; }
+}
