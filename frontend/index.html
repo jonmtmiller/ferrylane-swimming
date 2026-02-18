@@ -26,11 +26,14 @@
       <div class="card"><h2>Air temperature</h2><div class="big" id="airNow">–</div><div class="sub">&nbsp;</div></div>
       <div class="card"><h2>Flow rate (Maidenhead)</h2><div class="big" id="flowNow">–</div><div class="sub" id="flowUpdated">—</div></div>
       <div class="card" id="sewageCard"><h2>Sewage status (Wargrave)</h2><div class="big" id="edmStatus">–</div><div class="sub" id="edmDetail">—</div></div>
-      <section id="boards" class="card">
-  <h2>Reaches (EA boards)</h2>
-  <div id="boardRow" class="board-row" role="list"></div>
-  <div class="muted small">Data: Environment Agency River Thames current river conditions.</div>
+      <section class="card boards-card" aria-labelledby="boardsTitle">
+  <div class="card-header">
+    <h2 id="boardsTitle">River conditions (EA boards)</h2>
+    <small class="muted">Centred on Shiplake → Marsh</small>
+  </div>
+  <div id="boardsRow" class="boards-row" role="list"></div>
 </section>
+
 
 <!--      <div class="card"><h2>Weather (next 24h)</h2><div class="big" id="wxNow">–</div><div class="sub" id="wxDetail">—</div></div> -->
       <div class="card" id="forecastCard">
@@ -94,7 +97,9 @@
           <li>This is very much a work-in-progress, I'll be refining/adding things every now and then, such as weather details, discharge details etc</li>
           Jon
 <br /> <br />
-          <br />08JAN25 - Christmas mode now automatic between 1 Dec to 1 Jan inclusive, then from 2 Jan to end of Feb optional snow, which remembers whether you've toggled it on or off.
+          <br />18FEB26 - Adding new card, to show river boards from EA site, seeing as it's raining so much at the moment
+          <br />17FEB26 - Added date-driven icons for snow, starting with pancake day!  And, possibly less tasteless when sewage is discharging, let's see what we think of that.
+          <br />08JAN26 - Christmas mode now automatic between 1 Dec to 1 Jan inclusive, then from 2 Jan to end of Feb optional snow, which remembers whether you've toggled it on or off.
           <br />25DEC25 - Added Christmas mode!  Why didn't I think of that earlier in the month?!  It'll be available during December from now on.
           <br />08OCT25 - Cleaned up weather forecast, putting it behind a show/hide toggle, also fixing issue with daily vs hourly differences by aggregating rainfall.  Also caching for 15 mins rather than requesting every time, to avoiding exceeding Met Office limits.
           <br />05OCT25 - Signed up Met Office account and used that to retrieve daily forecast in tiles and hourly forecasts in scroller.  Added blatant self-promotion for upcoming gig in the header, because my site my rules.
