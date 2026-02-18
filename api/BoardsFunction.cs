@@ -35,7 +35,7 @@ public sealed class BoardsFunction
         try
         {
             var html = await GetString(GovUk);
-            rows = ParseGovUk(html);
+            rows = ParseGovUk(html, log);
             if (rows.Count < 5)
             {
                 log.LogWarning("GOV.UK parse yielded {Count} rows; trying TVM fallback.", rows.Count);
@@ -78,24 +78,58 @@ public sealed class BoardsFunction
     private static async Task<string> GetString(string url)
     {
         using var rq = new HttpRequestMessage(HttpMethod.Get, url);
-        rq.Headers.UserAgent.ParseAdd("Mozilla/5.0 (compatible; FerryLane/1.0)");
+        rq.Headers.UserAgent.ParseAdd("Mozilla/5.0 (compatible; FerryLane/1.0; +https://example.invalid)");
         rq.Headers.Accept.ParseAdd("text/html,*/*;q=0.8");
+        rq.Headers.AcceptLanguage.ParseAdd("en-GB,en;q=0.8");
         var rs = await Http.SendAsync(rq);
         rs.EnsureSuccessStatusCode();
         var bytes = await rs.Content.ReadAsByteArrayAsync();
         return Encoding.UTF8.GetString(bytes);
     }
 
-    // GOV.UK: look for "<strong>Shiplake Lock to Marsh Lock</strong>: Red increasing"
-    private static List<Row> ParseGovUk(string html)
+    // --------- GOV.UK parsing ---------
+
+    // Text-mode matcher:
+    //   "Shiplake Lock to Marsh Lock Red caution: strong stream"
+    //   "Upstream of Blakes Lock Red caution: strong stream"
+    private static readonly Regex ReachLine = new(
+        @"(?<reach>(?:Upstream of\s+[A-Za-z’'\- ]+ Lock|[A-Za-z’'\- ]+ Lock to [A-Za-z’'\- ]+ Lock))\s+(?<status>(?:Red|Yellow|Green)[^\.:\r\n<]*)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static (string Status, string? Trend) ParseStatusTrend(string raw)
+    {
+        var s = (raw ?? "").Trim().ToLowerInvariant();
+
+        // Strong stream (always red)
+        if (s.Contains("red caution")) return ("red", null);
+
+        // Yellow variations & trends
+        if (s.Contains("increasing")) return ("yellow", "increasing");
+        if (s.Contains("decreasing")) return ("yellow", "decreasing");
+        if (s.Contains("yellow caution") || s.Contains("caution stream") || s.Contains("caution"))
+            return ("yellow", null);
+
+        // Explicit "no stream warning"
+        if (s.Contains("no stream warning")) return ("green", null);
+
+        // If they literally wrote "Green", treat as green
+        if (s.StartsWith("green")) return ("green", null);
+
+        // Fallback (unknown wording)
+        return ("green", null);
+    }
+
+    private static List<Row> ParseGovUk(string html, ILogger log)
     {
         var rows = new List<Row>();
+
+        // 1) First try your original strict pattern (strong tag + colon)
         var section = ExtractSection(html, "Current river conditions", "What the warnings mean");
-        var rx = new Regex(
+        var rxStrong = new Regex(
             @"<strong>\s*([^<]+?)\s*</strong>\s*:\s*([Rr]ed|[Yy]ellow|[Gg]reen)\s*(increasing|decreasing|unchanged)?",
             RegexOptions.Compiled);
 
-        foreach (Match m in rx.Matches(section))
+        foreach (Match m in rxStrong.Matches(section))
         {
             var reach  = WebUtility.HtmlDecode(m.Groups[1].Value.Trim());
             var status = m.Groups[2].Value.ToLowerInvariant();
@@ -104,10 +138,38 @@ public sealed class BoardsFunction
             SplitReach(reach, out var from, out var to);
             rows.Add(new Row { Reach = reach, FromLock = from, ToLock = to, Status = status, Trend = trend });
         }
+
+        // 2) If we didn't get much, strip tags and do text-mode scan
+        if (rows.Count < 5)
+        {
+            var text = Regex.Replace(section, @"<[^>]+>", " ");     // remove HTML tags
+            text = WebUtility.HtmlDecode(text);
+            text = Regex.Replace(text, @"\s+", " ").Trim();
+
+            foreach (Match m in ReachLine.Matches(text))
+            {
+                var reach = m.Groups["reach"].Value.Trim();
+                var rawStatus = m.Groups["status"].Value.Trim();
+
+                var (status, trend) = ParseStatusTrend(rawStatus);
+
+                SplitReach(reach, out var from, out var to);
+                rows.Add(new Row { Reach = reach, FromLock = from, ToLock = to, Status = status, Trend = trend });
+            }
+
+            // It’s possible the two passes added duplicates; dedupe on Reach
+            rows = rows
+                .GroupBy(r => r.Reach, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+
+            log.LogInformation("GOV.UK text-mode parser produced {Count} rows.", rows.Count);
+        }
+
         return rows;
     }
 
-    // TVM fallback: headings for reach + paragraph with colour text
+    // --------- TVM fallback (unchanged) ---------
     private static List<Row> ParseTvm(string html)
     {
         var rows = new List<Row>();
@@ -142,6 +204,7 @@ public sealed class BoardsFunction
         return rows;
     }
 
+    // --------- Utilities (unchanged) ---------
     private static string ExtractSection(string html, string fromHeading, string toHeading)
     {
         var s = Regex.Replace(html, @"\s+", " ");
@@ -164,16 +227,21 @@ public sealed class BoardsFunction
     {
         from = ""; to = "";
         if (string.IsNullOrWhiteSpace(reach)) return;
-        var parts = reach.Split(" to ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 2)
+
+        if (reach.Contains(" to ", StringComparison.OrdinalIgnoreCase))
         {
-            from = parts[0].Replace(" Lock", "", StringComparison.OrdinalIgnoreCase);
-            to   = parts[1].Replace(" Lock", "", StringComparison.OrdinalIgnoreCase);
+            var parts = reach.Split(" to ", 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 2)
+            {
+                from = parts[0].Replace(" Lock", "", StringComparison.OrdinalIgnoreCase);
+                to   = parts[1].Replace(" Lock", "", StringComparison.OrdinalIgnoreCase);
+                return;
+            }
         }
-        else
-        {
-            from = reach;
-        }
+
+        // e.g., "Upstream of Blakes Lock" or anything else
+        from = reach;
+        to   = "";
     }
 
     private sealed class Row
