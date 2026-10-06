@@ -370,26 +370,72 @@ async function loadEDM() {
     }
 
     const status = item.AlertStatus || item.alertStatus || item.status || '—';
-    const start  = item.MostRecentDischargeAlertStart || item.startTime || item.LastStart || item.lastStart;
-    const stop   = item.MostRecentDischargeAlertStop  || item.stopTime  || item.LastStop  || item.lastStop;
 
+    const start =
+      item.MostRecentDischargeAlertStart ||
+      item.mostRecentDischargeAlertStart ||
+      item.startTime ||
+      item.LastStart ||
+      item.lastStart ||
+      null;
+    
+    const stop =
+      item.MostRecentDischargeAlertStop ||
+      item.mostRecentDischargeAlertStop ||
+      item.stopTime ||
+      item.LastStop ||
+      item.lastStop ||
+      null;
+    
+    const changed =
+      item.StatusChanged ||
+      item.statusChanged ||
+      item.lastUpdated ||
+      null;
+    
+    const past48 =
+      item.AlertPast48Hours ??
+      item.alertPast48Hours ??
+      null;
+
+    $('edmStatus').textContent =
+      active ? 'Discharging' : status.replace(/\b\w/g, c => c.toUpperCase());
+
+    
+    const active =
+      /discharging/i.test(String(status)) &&
+      !/not discharging/i.test(String(status));
+    
+    if (active) {
+      $('sewageCard').classList.add('alert');
+    } else {
+      $('sewageCard').classList.remove('alert');
+    }
+    
     $('edmStatus').textContent = String(status).toUpperCase();
-    const active = !!(start && !stop);
-    if (active) $('sewageCard').classList.add('alert'); else $('sewageCard').classList.remove('alert');
-    $('edmDetail').textContent = start
-      ? (stop ? `Last event ended ${new Date(stop).toLocaleString()}`
-              : `Event started ${new Date(start).toLocaleString()}`)
-      : 'No recent event info';
-
-    // <-- expose a flag + notify listeners (snow engine will restart)
+    
+    let detail = '';
+    
+    if (active && start) {
+      detail = `Event started ${new Date(start).toLocaleString()}`;
+    } else if (start && stop) {
+      detail = `Last event ${new Date(start).toLocaleString()} – ${new Date(stop).toLocaleString()}`;
+    } else if (stop) {
+      detail = `Last event ended ${new Date(stop).toLocaleString()}`;
+    } else if (changed) {
+      detail = `Status changed ${new Date(changed).toLocaleString()}`;
+    } else if (past48 === true) {
+      detail = 'Discharge recorded in past 48 hours';
+    } else if (past48 === false) {
+      detail = 'No discharge recorded in past 48 hours';
+    } else {
+      detail = 'No recent event info';
+    }
+    
+    $('edmDetail').textContent = detail;
+    
     window._sewageActive = active;
     window.dispatchEvent(new CustomEvent('edm-change', { detail: { active }}));
-  } catch (e) {
-    console.error('EDM load failed', e);
-    $('edmStatus').textContent = 'Unavailable';
-    $('edmDetail').textContent = 'Check later';
-    window._sewageActive = false;
-    window.dispatchEvent(new CustomEvent('edm-change', { detail: { active: false }}));
   }
 }
 
