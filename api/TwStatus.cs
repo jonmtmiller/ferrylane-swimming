@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
@@ -11,7 +12,7 @@ public class TwStatus
     public TwStatus(IHttpClientFactory f)
     {
         _http = f.CreateClient();
-        _http.Timeout = TimeSpan.FromSeconds(12);
+        _http.Timeout = TimeSpan.FromSeconds(15);
     }
 
     [Function("TwStatus")]
@@ -20,35 +21,27 @@ public class TwStatus
         HttpRequestData req)
     {
         var qs = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-    
+
         var site = qs["site"] ?? "Wargrave";
         var debug = qs["debug"] == "1";
-        var all = qs["all"] == "1";
-        var v2 = qs["v2"] == "1";
-    
-        var baseUrl = v2
-            ? "https://api.thameswater.co.uk/opendata/v2/discharge/status"
-            : "https://prod-tw-opendata-app.uk-e1.cloudhub.io/data/STE/v1/DischargeCurrentStatus";
-    
-        // Existing v1 endpoint supports the LocationName filter.
-        // The v2 endpoint may not use the same query format, so for v2 we start by calling the base endpoint.
-        var url = all || v2
-            ? baseUrl
-            : $"{baseUrl}?col_1=LocationName&operand_1=eq&value_1={Uri.EscapeDataString(site)}";
+        var useV1 = qs["v1"] == "1";
 
         var id = Environment.GetEnvironmentVariable("TW_CLIENT_ID");
         var secret = Environment.GetEnvironmentVariable("TW_CLIENT_SECRET");
 
         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(secret))
         {
-            return await Json(req, HttpStatusCode.InternalServerError, $$"""
+            return await Json(req, HttpStatusCode.InternalServerError, new
             {
-              "ok": false,
-              "stage": "config",
-              "error": "Missing TW_CLIENT_ID or TW_CLIENT_SECRET"
-            }
-            """);
+                ok = false,
+                stage = "config",
+                error = "Missing TW_CLIENT_ID or TW_CLIENT_SECRET"
+            });
         }
+
+        var url = useV1
+            ? $"https://prod-tw-opendata-app.uk-e1.cloudhub.io/data/STE/v1/DischargeCurrentStatus?col_1=LocationName&operand_1=eq&value_1={Uri.EscapeDataString(site)}"
+            : "https://api.thameswater.co.uk/opendata/v2/discharge/status";
 
         using var msg = new HttpRequestMessage(HttpMethod.Get, url);
         msg.Headers.Add("client_id", id);
@@ -60,99 +53,173 @@ public class TwStatus
 
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
             var upstream = await _http.SendAsync(msg, cts.Token);
             var body = await upstream.Content.ReadAsStringAsync(cts.Token);
             sw.Stop();
 
             if (!upstream.IsSuccessStatusCode)
             {
-                var safeBody = debug ? EscapeJson(body) : "";
-                return await Json(req, upstream.StatusCode, $$"""
-                    {
-                      "ok": false,
-                      "stage": "upstream",
-                      "site": "{{EscapeJson(site)}}",
-                      "v2": {{v2.ToString().ToLowerInvariant()}},
-                      "all": {{all.ToString().ToLowerInvariant()}},
-                      "upstreamUrl": "{{EscapeJson(url)}}",
-                      "upstreamStatus": {{(int)upstream.StatusCode}},
-                      "elapsedMs": {{sw.ElapsedMilliseconds}},
-                      "body": "{{safeBody}}"
-                    }
-                    """);
+                return await Json(req, upstream.StatusCode, new
+                {
+                    ok = false,
+                    stage = "upstream",
+                    site,
+                    source = useV1 ? "v1" : "v2",
+                    upstreamUrl = url,
+                    upstreamStatus = (int)upstream.StatusCode,
+                    elapsedMs = sw.ElapsedMilliseconds,
+                    body = debug ? body : ""
+                });
             }
 
-            // Normal, non-debug path: return Thames Water JSON as before
+            // Legacy v1 path: return raw body as before.
+            // Mostly kept for comparison/debug.
+            if (useV1)
+            {
+                if (!debug)
+                    return await RawJson(req, HttpStatusCode.OK, body, "public, max-age=120");
+
+                return await Json(req, HttpStatusCode.OK, new
+                {
+                    ok = true,
+                    stage = "success",
+                    site,
+                    source = "v1",
+                    upstreamUrl = url,
+                    elapsedMs = sw.ElapsedMilliseconds,
+                    bodyLength = body.Length,
+                    bodyPreview = body.Length > 3000 ? body[..3000] + "...[truncated]" : body
+                });
+            }
+
+            // v2 path: parse full list, filter locally.
+            using var doc = JsonDocument.Parse(body);
+
+            if (!doc.RootElement.TryGetProperty("items", out var items) ||
+                items.ValueKind != JsonValueKind.Array)
+            {
+                return await Json(req, HttpStatusCode.BadGateway, new
+                {
+                    ok = false,
+                    stage = "parse",
+                    source = "v2",
+                    site,
+                    error = "Response did not contain an items array",
+                    bodyPreview = debug ? (body.Length > 3000 ? body[..3000] + "...[truncated]" : body) : ""
+                });
+            }
+
+            var exactMatches = new List<JsonElement>();
+            var containsMatches = new List<JsonElement>();
+            var sampleNames = new List<string>();
+
+            foreach (var item in items.EnumerateArray())
+            {
+                var name = GetString(item, "locationName");
+
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    if (sampleNames.Count < 30) sampleNames.Add(name);
+
+                    if (string.Equals(name, site, StringComparison.OrdinalIgnoreCase))
+                    {
+                        exactMatches.Add(item.Clone());
+                    }
+                    else if (name.Contains(site, StringComparison.OrdinalIgnoreCase))
+                    {
+                        containsMatches.Add(item.Clone());
+                    }
+                }
+            }
+
+            var matches = exactMatches.Count > 0 ? exactMatches : containsMatches;
+
             if (!debug)
             {
-                var res = req.CreateResponse(HttpStatusCode.OK);
-                res.Headers.Add("Cache-Control", "public, max-age=120");
-                res.Headers.Add("Content-Type", "application/json; charset=utf-8");
-                await res.WriteStringAsync(body);
-                return res;
+                return await Json(req, HttpStatusCode.OK, new
+                {
+                    items = matches
+                }, "public, max-age=120");
             }
 
-            // Debug path: wrap the upstream response so we can see timing and size
-            var debugBody = body.Length > 3000 ? body[..3000] + "...[truncated]" : body;
-            return await Json(req, HttpStatusCode.OK, $$"""
-                {
-                  "ok": true,
-                  "stage": "success",
-                  "site": "{{EscapeJson(site)}}",
-                  "v2": {{v2.ToString().ToLowerInvariant()}},
-                  "all": {{all.ToString().ToLowerInvariant()}},
-                  "upstreamUrl": "{{EscapeJson(url)}}",
-                  "elapsedMs": {{sw.ElapsedMilliseconds}},
-                  "bodyLength": {{body.Length}},
-                  "bodyPreview": "{{EscapeJson(debugBody)}}"
-                }
-                """);
+            return await Json(req, HttpStatusCode.OK, new
+            {
+                ok = true,
+                stage = "success",
+                source = "v2",
+                site,
+                upstreamUrl = url,
+                elapsedMs = sw.ElapsedMilliseconds,
+                totalItems = items.GetArrayLength(),
+                exactMatchCount = exactMatches.Count,
+                containsMatchCount = containsMatches.Count,
+                returnedCount = matches.Count,
+                items = matches,
+                sampleNames
+            });
         }
         catch (TaskCanceledException ex)
         {
             sw.Stop();
-            return await Json(req, HttpStatusCode.GatewayTimeout, $$"""
+            return await Json(req, HttpStatusCode.GatewayTimeout, new
             {
-              "ok": false,
-              "stage": "timeout",
-              "site": "{{EscapeJson(site)}}",
-              "elapsedMs": {{sw.ElapsedMilliseconds}},
-              "error": "{{EscapeJson(ex.Message)}}"
-            }
-            """);
+                ok = false,
+                stage = "timeout",
+                site,
+                elapsedMs = sw.ElapsedMilliseconds,
+                error = ex.Message
+            });
         }
         catch (Exception ex)
         {
             sw.Stop();
-            return await Json(req, HttpStatusCode.BadGateway, $$"""
+            return await Json(req, HttpStatusCode.BadGateway, new
             {
-              "ok": false,
-              "stage": "exception",
-              "site": "{{EscapeJson(site)}}",
-              "elapsedMs": {{sw.ElapsedMilliseconds}},
-              "error": "{{EscapeJson(ex.Message)}}"
-            }
-            """);
+                ok = false,
+                stage = "exception",
+                site,
+                elapsedMs = sw.ElapsedMilliseconds,
+                error = ex.Message
+            });
         }
     }
 
-    private static async Task<HttpResponseData> Json(HttpRequestData req, HttpStatusCode code, string json)
+    private static string? GetString(JsonElement e, string name)
+    {
+        return e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString()
+            : null;
+    }
+
+    private static async Task<HttpResponseData> Json(
+        HttpRequestData req,
+        HttpStatusCode code,
+        object payload,
+        string cacheControl = "no-store")
     {
         var res = req.CreateResponse(code);
-        res.Headers.Add("Cache-Control", "no-store");
+        res.Headers.Add("Cache-Control", cacheControl);
         res.Headers.Add("Content-Type", "application/json; charset=utf-8");
-        await res.WriteStringAsync(json);
+
+        await res.WriteStringAsync(JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        }));
+
         return res;
     }
 
-    private static string EscapeJson(string? s)
+    private static async Task<HttpResponseData> RawJson(
+        HttpRequestData req,
+        HttpStatusCode code,
+        string json,
+        string cacheControl = "no-store")
     {
-        if (string.IsNullOrEmpty(s)) return "";
-        return s
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\r", "\\r")
-            .Replace("\n", "\\n");
+        var res = req.CreateResponse(code);
+        res.Headers.Add("Cache-Control", cacheControl);
+        res.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        await res.WriteStringAsync(json);
+        return res;
     }
 }
