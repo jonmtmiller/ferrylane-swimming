@@ -24,7 +24,23 @@
     <section class="now-grid" id="now">
       <div class="card"><h2>River temperature</h2><div class="big" id="riverNow">–</div><div class="sub" id="riverUpdated">—</div></div>
       <div class="card"><h2>Air temperature</h2><div class="big" id="airNow">–</div><div class="sub">&nbsp;</div></div>
-      <div class="card"><h2>Flow rate (Maidenhead)</h2><div class="big" id="flowNow">–</div><div class="sub" id="flowUpdated">—</div></div>
+      <div class="card">
+        <h2>Flow rate</h2>
+      
+        <div class="flow-readings">
+          <div class="flow-reading">
+            <div class="sub">Reading</div>
+            <div class="big small-big" id="flowNowReading">–</div>
+            <div class="sub" id="flowUpdatedReading">—</div>
+          </div>
+      
+          <div class="flow-reading">
+            <div class="sub">Maidenhead</div>
+            <div class="big small-big" id="flowNowMaidenhead">–</div>
+            <div class="sub" id="flowUpdatedMaidenhead">—</div>
+          </div>
+        </div>
+      </div>
       <div class="card" id="sewageCard"><h2>Sewage status (Wargrave)</h2><div class="big" id="edmStatus">–</div><div class="sub" id="edmDetail">—</div></div>
 
       <section class="card boards-card collapsed" aria-labelledby="boardsTitle">
