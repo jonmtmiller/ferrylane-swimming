@@ -19,12 +19,20 @@ public class TwStatus
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "tw/status")]
         HttpRequestData req)
     {
-        var qs = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
         var site = qs["site"] ?? "Wargrave";
         var debug = qs["debug"] == "1";
-
-        var baseUrl = "https://prod-tw-opendata-app.uk-e1.cloudhub.io/data/STE/v1/DischargeCurrentStatus";
-        var url = $"{baseUrl}?col_1=LocationName&operand_1=eq&value_1={Uri.EscapeDataString(site)}";
+        var all = qs["all"] == "1";
+        var v2 = qs["v2"] == "1";
+        
+        var baseUrl = v2
+            ? "https://api.thameswater.co.uk/opendata/v2/discharge/status"
+            : "https://prod-tw-opendata-app.uk-e1.cloudhub.io/data/STE/v1/DischargeCurrentStatus";
+        
+        // Existing v1 endpoint supports the LocationName filter.
+        // The v2 endpoint may not use the same query format, so for v2 we start by calling the base endpoint.
+        var url = all || v2
+            ? baseUrl
+            : $"{baseUrl}?col_1=LocationName&operand_1=eq&value_1={Uri.EscapeDataString(site)}";
 
         var id = Environment.GetEnvironmentVariable("TW_CLIENT_ID");
         var secret = Environment.GetEnvironmentVariable("TW_CLIENT_SECRET");
@@ -59,15 +67,18 @@ public class TwStatus
             {
                 var safeBody = debug ? EscapeJson(body) : "";
                 return await Json(req, upstream.StatusCode, $$"""
-                {
-                  "ok": false,
-                  "stage": "upstream",
-                  "site": "{{EscapeJson(site)}}",
-                  "upstreamStatus": {{(int)upstream.StatusCode}},
-                  "elapsedMs": {{sw.ElapsedMilliseconds}},
-                  "body": "{{safeBody}}"
-                }
-                """);
+                    {
+                      "ok": false,
+                      "stage": "upstream",
+                      "site": "{{EscapeJson(site)}}",
+                      "v2": {{v2.ToString().ToLowerInvariant()}},
+                      "all": {{all.ToString().ToLowerInvariant()}},
+                      "upstreamUrl": "{{EscapeJson(url)}}",
+                      "upstreamStatus": {{(int)upstream.StatusCode}},
+                      "elapsedMs": {{sw.ElapsedMilliseconds}},
+                      "body": "{{safeBody}}"
+                    }
+                    """);
             }
 
             // Normal, non-debug path: return Thames Water JSON as before
@@ -83,15 +94,18 @@ public class TwStatus
             // Debug path: wrap the upstream response so we can see timing and size
             var debugBody = body.Length > 3000 ? body[..3000] + "...[truncated]" : body;
             return await Json(req, HttpStatusCode.OK, $$"""
-            {
-              "ok": true,
-              "stage": "success",
-              "site": "{{EscapeJson(site)}}",
-              "elapsedMs": {{sw.ElapsedMilliseconds}},
-              "bodyLength": {{body.Length}},
-              "bodyPreview": "{{EscapeJson(debugBody)}}"
-            }
-            """);
+                {
+                  "ok": true,
+                  "stage": "success",
+                  "site": "{{EscapeJson(site)}}",
+                  "v2": {{v2.ToString().ToLowerInvariant()}},
+                  "all": {{all.ToString().ToLowerInvariant()}},
+                  "upstreamUrl": "{{EscapeJson(url)}}",
+                  "elapsedMs": {{sw.ElapsedMilliseconds}},
+                  "bodyLength": {{body.Length}},
+                  "bodyPreview": "{{EscapeJson(debugBody)}}"
+                }
+                """);
         }
         catch (TaskCanceledException ex)
         {
