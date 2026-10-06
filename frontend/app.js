@@ -360,13 +360,16 @@ async function loadEDM() {
   try {
     const res = await fetch('/api/tw/status?site=Wargrave', { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
     const json = await res.json();
     const item = (json.items && json.items[0]) || json[0] || json;
-    if (!item) { 
-      $('edmStatus').textContent = 'No data'; 
+
+    if (!item) {
+      $('edmStatus').textContent = 'No data';
+      $('edmDetail').textContent = 'No Thames Water record found';
       window._sewageActive = false;
       window.dispatchEvent(new CustomEvent('edm-change', { detail: { active: false }}));
-      return; 
+      return;
     }
 
     const status = item.AlertStatus || item.alertStatus || item.status || '—';
@@ -378,7 +381,7 @@ async function loadEDM() {
       item.LastStart ||
       item.lastStart ||
       null;
-    
+
     const stop =
       item.MostRecentDischargeAlertStop ||
       item.mostRecentDischargeAlertStop ||
@@ -386,36 +389,33 @@ async function loadEDM() {
       item.LastStop ||
       item.lastStop ||
       null;
-    
+
     const changed =
       item.StatusChanged ||
       item.statusChanged ||
       item.lastUpdated ||
       null;
-    
+
     const past48 =
       item.AlertPast48Hours ??
       item.alertPast48Hours ??
       null;
 
-    $('edmStatus').textContent =
-      active ? 'Discharging' : status.replace(/\b\w/g, c => c.toUpperCase());
-
-    
     const active =
       /discharging/i.test(String(status)) &&
       !/not discharging/i.test(String(status));
-    
+
     if (active) {
       $('sewageCard').classList.add('alert');
     } else {
       $('sewageCard').classList.remove('alert');
     }
-    
-    $('edmStatus').textContent = String(status).toUpperCase();
-    
+
+    $('edmStatus').textContent =
+      active ? 'Discharging' : String(status).replace(/\b\w/g, c => c.toUpperCase());
+
     let detail = '';
-    
+
     if (active && start) {
       detail = `Event started ${new Date(start).toLocaleString()}`;
     } else if (start && stop) {
@@ -431,11 +431,21 @@ async function loadEDM() {
     } else {
       detail = 'No recent event info';
     }
-    
+
     $('edmDetail').textContent = detail;
-    
+
     window._sewageActive = active;
     window.dispatchEvent(new CustomEvent('edm-change', { detail: { active }}));
+  } catch (e) {
+    console.error('EDM load failed', e);
+
+    $('edmStatus').textContent = 'Unavailable';
+    $('edmDetail').textContent = 'Check later';
+
+    if ($('sewageCard')) $('sewageCard').classList.remove('alert');
+
+    window._sewageActive = false;
+    window.dispatchEvent(new CustomEvent('edm-change', { detail: { active: false }}));
   }
 }
 
