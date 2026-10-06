@@ -19,15 +19,17 @@ public class TwStatus
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "tw/status")]
         HttpRequestData req)
     {
+        var qs = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+    
         var site = qs["site"] ?? "Wargrave";
         var debug = qs["debug"] == "1";
         var all = qs["all"] == "1";
         var v2 = qs["v2"] == "1";
-        
+    
         var baseUrl = v2
             ? "https://api.thameswater.co.uk/opendata/v2/discharge/status"
             : "https://prod-tw-opendata-app.uk-e1.cloudhub.io/data/STE/v1/DischargeCurrentStatus";
-        
+    
         // Existing v1 endpoint supports the LocationName filter.
         // The v2 endpoint may not use the same query format, so for v2 we start by calling the base endpoint.
         var url = all || v2
