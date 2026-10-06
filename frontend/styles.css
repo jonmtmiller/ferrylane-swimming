@@ -155,22 +155,41 @@ a { color: var(--accent); }
   .boards-row { grid-template-columns: 1fr; }
 }
 
+
 .flow-readings {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+  align-items: start;
 }
 
 .flow-reading {
   min-width: 0;
 }
 
-.small-big {
-  font-size: clamp(1.6rem, 4vw, 2.4rem);
+/* Make the flow numbers smaller than the main temperature-style cards */
+.flow-reading .big,
+.flow-reading .small-big {
+  font-size: clamp(1.35rem, 2.2vw, 1.9rem);
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
-@media (max-width: 520px) {
+/* Keep units from making the layout feel huge */
+.flow-reading .sub {
+  line-height: 1.25;
+}
+
+/* Only stack on genuinely narrow screens */
+@media (max-width: 380px) {
   .flow-readings {
     grid-template-columns: 1fr;
   }
+
+  .flow-reading .big,
+  .flow-reading .small-big {
+    font-size: 1.5rem;
+  }
 }
+
+
