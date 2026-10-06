@@ -229,73 +229,131 @@ async function loadTemps(days = 10) {
 
 /* ========= Flow ========= */
 async function loadFlow(days = 14) {
+  const FLOW_MEASURES = [
+    {
+      key: 'reading',
+      label: 'Reading',
+      measure: '2200TH-flow--Mean-15_min-m3_s',
+      nowId: 'flowNowReading',
+      updatedId: 'flowUpdatedReading'
+    },
+    {
+      key: 'maidenhead',
+      label: 'Maidenhead',
+      measure: '2604TH-flow--i-15_min-m3_s',
+      nowId: 'flowNowMaidenhead',
+      updatedId: 'flowUpdatedMaidenhead'
+    }
+  ];
+
   const sinceISO = new Date(Date.now() - days * DAY).toISOString();
   const estLimit = Math.ceil(days * 96 * 1.2); // ~15-min samples per day with buffer
-  const url = `/api/ea/flow?measure=2604TH-flow--i-15_min-m3_s&since=${encodeURIComponent(sinceISO)}&limit=${estLimit}`;
 
-  let data;
-  try {
+  async function fetchMeasure(m) {
+    const url = `/api/ea/flow?measure=${encodeURIComponent(m.measure)}&since=${encodeURIComponent(sinceISO)}&limit=${estLimit}`;
+
     const res = await fetch(url, { cache: 'no-store' });
-    data = await res.json();
+    if (!res.ok) throw new Error(`${m.label} flow HTTP ${res.status}`);
+
+    const data = await res.json();
+
+    const items = (data.items || [])
+      .map(r => ({ t: new Date(r.dateTime), v: Number(r.value) }))
+      .filter(r => Number.isFinite(r.v) && !Number.isNaN(r.t.getTime()))
+      .sort((a, b) => a.t - b.t);
+
+    if (!items.length) return { ...m, items: [], pts: [] };
+
+    // Anchor this station to its newest reading
+    const endMs = items[items.length - 1].t.getTime();
+    const cutMs = endMs - days * DAY;
+    const pts = items.filter(p => p.t.getTime() >= cutMs);
+
+    return { ...m, items, pts };
+  }
+
+  let series;
+  try {
+    series = await Promise.all(FLOW_MEASURES.map(fetchMeasure));
   } catch (e) {
     console.error('EA fetch failed', e);
-    flowNow.textContent = 'Unavailable';
-    flowUpdated.textContent = '—';
+
+    for (const m of FLOW_MEASURES) {
+      const nowEl = document.getElementById(m.nowId);
+      const updatedEl = document.getElementById(m.updatedId);
+      if (nowEl) nowEl.textContent = 'Unavailable';
+      if (updatedEl) updatedEl.textContent = '—';
+    }
+
     return;
   }
 
-  const items = (data.items || [])
-    .map(r => ({ t: new Date(r.dateTime), v: Number(r.value) }))
-    .filter(r => Number.isFinite(r.v))
-    .sort((a, b) => a.t - b.t);
+  // Update the “now” panels
+  for (const s of series) {
+    const nowEl = document.getElementById(s.nowId);
+    const updatedEl = document.getElementById(s.updatedId);
 
-  if (!items.length) {
-    flowNow.textContent = 'No data';
-    flowUpdated.textContent = '—';
+    if (!s.pts.length) {
+      if (nowEl) nowEl.textContent = 'No data';
+      if (updatedEl) updatedEl.textContent = '—';
+      continue;
+    }
+
+    const last = s.pts[s.pts.length - 1];
+    if (nowEl) nowEl.textContent = `${last.v.toFixed(1)} m³/s`;
+    if (updatedEl) updatedEl.textContent = since(last.t);
+  }
+
+  const populated = series.filter(s => s.pts.length);
+  if (!populated.length) {
+    document.getElementById('flowTitle').textContent = `Flow rate (last ${days} days)`;
+    flowChart?.destroy();
+    setActive('flowRanges', days);
     return;
   }
 
-  // Anchor window to newest reading
-  const endMs = items[items.length - 1].t.getTime();
-  const cutMs = endMs - days * DAY;
-  const pts = items.filter(p => p.t.getTime() >= cutMs);
-  if (!pts.length) {
-    flowNow.textContent = 'No data';
-    flowUpdated.textContent = '—';
-    return;
-  }
+  // Use the overall min/max across both stations, so both lines share the same x-axis
+  const allPts = populated.flatMap(s => s.pts);
+  const xMin = Math.min(...allPts.map(p => p.t.getTime()));
+  const xMax = Math.max(...allPts.map(p => p.t.getTime()));
 
-  // “Now” panel
-  const last = pts[pts.length - 1];
-  flowNow.textContent = `${last.v.toFixed(1)} m³/s`;
-  flowUpdated.textContent = since(last.t);
-
-  // Title + chart
-  document.getElementById('flowTitle').textContent = `Flow rate (last ${days} days)`;
-  const xMin = pts[0].t.getTime();
-  const xMax = pts[pts.length - 1].t.getTime();
+  document.getElementById('flowTitle').textContent = `Flow rate — Reading and Maidenhead (last ${days} days)`;
 
   flowChart?.destroy();
   flowChart = new Chart(document.getElementById('flowChart'), {
     type: 'line',
     data: {
-      datasets: [
-        { label: 'Flow (m³/s)', data: pts.map(p => ({ x: p.t.getTime(), y: p.v })) }
-      ]
+      datasets: populated.map(s => ({
+        label: `${s.label} flow (m³/s)`,
+        data: s.pts.map(p => ({ x: p.t.getTime(), y: p.v }))
+      }))
     },
     options: {
-      animation: false, parsing: false, responsive: true,
-      plugins: { legend: { position: 'bottom' }, decimation: { enabled: true, algorithm: 'min-max' } },
+      animation: false,
+      parsing: false,
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom' },
+        decimation: { enabled: true, algorithm: 'min-max' }
+      },
       interaction: { intersect: false, mode: 'nearest' },
       scales: {
-        x: { type: 'time', min: xMin, max: xMax, time: { unit: days <= 2 ? 'hour' : 'day' } },
-        y: { title: { display: true, text: 'm³/s' } }
+        x: {
+          type: 'time',
+          min: xMin,
+          max: xMax,
+          time: { unit: days <= 2 ? 'hour' : 'day' }
+        },
+        y: {
+          title: { display: true, text: 'm³/s' }
+        }
       }
     }
   });
 
   setActive('flowRanges', days);
 }
+
 
 /* ========= EDM ========= */
 async function loadEDM() {
