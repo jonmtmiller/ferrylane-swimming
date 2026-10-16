@@ -195,7 +195,7 @@ a { color: var(--accent); }
 
 /* Sun & Moon card */
 .sunmoon-card {
-  margin-top: 12px;
+  
 }
 
 .sunmoon-daily {
@@ -261,4 +261,16 @@ a { color: var(--accent); }
     font-size: 1.35rem;
   }
 }
+
+/* Keep sunrise and sunset readable on narrow cards */
+@container (max-width: 290px) {
+  .sunmoon-daily {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sunmoon-card {
+  container-type: inline-size;
+}
+
 
