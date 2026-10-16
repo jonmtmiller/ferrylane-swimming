@@ -773,102 +773,99 @@ function loadSunMoon() {
 
   // -------- NEXT FULL MOON --------
 
-  // SunCalc's lunar phase runs from:
-  // 0 = new moon, 0.25 = first quarter,
-  // 0.5 = full moon, 0.75 = last quarter.
-  //
-  // Search forward in six-hour increments, then refine
-  // the moment when phase crosses 0.5.
-
-  const phaseAt = date =>
-    SunCalc.getMoonIllumination(date).phase;
-
-  function findNextFullMoon(startDate) {
-    const step = 6 * 60 * 60 * 1000;
-    const maxSearch = 36 * 24 * 60 * 60 * 1000;
-
-    let previous = startDate.getTime();
-    let previousPhase = phaseAt(new Date(previous));
-
-    for (
-      let current = previous + step;
-      current <= startDate.getTime() + maxSearch;
-      current += step
-    ) {
-      const currentPhase = phaseAt(new Date(current));
-
-      if (previousPhase < 0.5 && currentPhase >= 0.5) {
-        // Binary search to approximately one minute.
-        let low = previous;
-        let high = current;
-
-        while (high - low > 60000) {
-          const middle = (low + high) / 2;
-          const phase = phaseAt(new Date(middle));
-
-          if (phase < 0.5) {
-            low = middle;
-          } else {
-            high = middle;
-          }
-        }
-
-        return new Date((low + high) / 2);
-      }
-
-      previous = current;
-      previousPhase = currentPhase;
-    }
-
-    return null;
-  }
-
-  const fullMoon = findNextFullMoon(now);
-
-  if (fullMoon) {
-    $sm('fullMoonDate').textContent =
-      `${formatDate(fullMoon)} · ${formatTime(fullMoon)}`;
-
-    const remainingMs = fullMoon.getTime() - now.getTime();
-    const remainingHours = Math.ceil(remainingMs / 3600000);
-    const remainingDays = Math.ceil(remainingMs / 86400000);
-
-    let countdown;
-
-    if (remainingHours <= 1) {
-      countdown = 'Less than an hour away';
-    } else if (remainingHours < 24) {
-      countdown = `In ${remainingHours} hours`;
-    } else if (remainingDays === 1) {
-      countdown = 'Tomorrow';
-    } else {
-      countdown = `In ${remainingDays} days`;
-    }
-
-    $sm('fullMoonDetail').textContent =
-      `${countdown} · Estimated full moon (UK time)`;
-  } else {
-    $sm('fullMoonDate').textContent = 'Unavailable';
-    $sm('fullMoonDetail').textContent =
-      'Could not calculate the next full moon';
-  }
 
   
-  // -------- FULL MOON VIEWING --------
+  // -------- FULL MOON & SUGGESTED VIEWING --------
 
-  // Suggested minimum altitude to clear the opposite-bank trees.
-  // Adjust after observing a couple of full moon swims.
-  const MIN_MOON_ALTITUDE = 15;
-
+  const moonDateEl = document.getElementById('fullMoonDate');
+  const moonDetailEl = document.getElementById('fullMoonDetail');
   const moonriseEl = document.getElementById('moonriseTime');
   const visibleEl = document.getElementById('moonVisibleTime');
   const noteEl = document.getElementById('moonViewingNote');
 
-  const moonAltitude = date =>
-    SunCalc.getMoonPosition(date, LAT, LON).altitude * 180 / Math.PI;
+  const MIN_MOON_ALTITUDE = 15; // Degrees above horizon
 
-  // Detect when an angle is crossed going upwards.
-  // Interpolate between samples for a more precise estimate.
+  if (!window.Astronomy) {
+    console.error('[SunMoon] Astronomy Engine failed to load');
+    moonDateEl.textContent = 'Unavailable';
+    moonDetailEl.textContent = 'Astronomy library unavailable';
+    moonriseEl.textContent = '—';
+    visibleEl.textContent = '—';
+    noteEl.textContent = 'Please check browser console';
+    return;
+  }
+
+  // Accurate full moon: ecliptic longitude difference = 180 degrees.
+  const phaseResult = Astronomy.SearchMoonPhase(180, now, 40);
+
+  if (!phaseResult) {
+    moonDateEl.textContent = 'Unavailable';
+    moonDetailEl.textContent = 'Could not calculate full moon';
+    moonriseEl.textContent = '—';
+    visibleEl.textContent = '—';
+    noteEl.textContent = '';
+    return;
+  }
+
+  const fullMoon = phaseResult.date;
+
+  moonDateEl.textContent =
+    `${formatDate(fullMoon)} · ${formatTime(fullMoon)}`;
+
+  // Countdown to the actual full moon.
+  const remainingMs = fullMoon.getTime() - now.getTime();
+  const remainingHours = Math.ceil(remainingMs / 3600000);
+  const remainingDays = Math.ceil(remainingMs / 86400000);
+
+  let countdown;
+
+  if (remainingHours <= 1) {
+    countdown = 'Less than an hour away';
+  } else if (remainingHours < 24) {
+    countdown = `In ${remainingHours} hours`;
+  } else if (remainingDays === 1) {
+    countdown = 'Tomorrow';
+  } else {
+    countdown = `In ${remainingDays} days`;
+  }
+
+  moonDetailEl.textContent = countdown;
+
+  // -------- CHOOSE THE VIEWING EVENING --------
+
+  // If the full moon occurs before noon UK time,
+  // suggest the preceding evening.
+  // Otherwise suggest the same evening.
+  //
+  // This keeps the chosen swim evening reasonably close
+  // to the full moon itself.
+
+  const moonUK = ukParts(fullMoon);
+  const viewingDayOffset = moonUK.hour < 12 ? -1 : 0;
+
+  // Noon UTC on the chosen calendar date.
+  // Safe for the UK's BST/GMT clock changes.
+  const viewingDay = new Date(Date.UTC(
+    moonUK.year,
+    moonUK.month - 1,
+    moonUK.day + viewingDayOffset,
+    12, 0, 0
+  ));
+
+  const viewingDate = date =>
+    `${formatDate(date)}, ${formatTime(date)}`;
+
+  // -------- MOON ALTITUDE --------
+
+  function moonAltitude(date) {
+    return SunCalc.getMoonPosition(
+      date, LAT, LON
+    ).altitude * 180 / Math.PI;
+  }
+
+  // Find the first time the moon rises through a given
+  // altitude, using five-minute samples and interpolation.
+
   function upwardCrossing(start, end, targetDegrees) {
     const stepMs = 5 * 60 * 1000;
 
@@ -902,78 +899,81 @@ function loadSunMoon() {
     return null;
   }
 
-  function getFullMoonViewing(fullMoonDate) {
-    const HOUR = 60 * 60 * 1000;
+  const HOUR = 60 * 60 * 1000;
 
-    // Search around the full moon for moonrises.
-    const start = new Date(fullMoonDate.getTime() - 36 * HOUR);
-    const end = new Date(fullMoonDate.getTime() + 36 * HOUR);
+  // Search from lunchtime on the viewing day through
+  // the following early morning.
+  const searchStart = viewingDay;
+  const searchEnd = new Date(
+    viewingDay.getTime() + 16 * HOUR
+  );
 
-    const rises = [];
-    let cursor = start;
+  const moonrise = upwardCrossing(
+    searchStart, searchEnd, 0
+  );
 
-    while (cursor < end) {
-      const next = upwardCrossing(cursor, end, 0);
-      if (!next) break;
+  const altitude15 = moonrise
+    ? upwardCrossing(
+        new Date(moonrise.getTime() + 5 * 60000),
+        searchEnd,
+        MIN_MOON_ALTITUDE
+      )
+    : null;
 
-      rises.push(next);
+  // -------- TWILIGHT --------
 
-      // Advance beyond this crossing before looking for another.
-      cursor = new Date(next.getTime() + 6 * HOUR);
-    }
+  // SunCalc dusk is the end of civil twilight
+  // (Sun approximately 6 degrees below horizon).
+  const sunTimes = SunCalc.getTimes(
+    viewingDay, LAT, LON
+  );
 
-    if (!rises.length) return null;
+  const dusk = sunTimes.dusk;
 
-    // Find the moonrise closest to the exact full moon.
-    const rise = rises.reduce((best, candidate) =>
-      Math.abs(candidate - fullMoonDate) <
-      Math.abs(best - fullMoonDate)
-        ? candidate
-        : best
-    );
+  // Earliest proposed viewing time must satisfy both:
+  // - Moon >= 15 degrees
+  // - Civil twilight has ended
 
-    // Calculate when it rises to our preferred 15° altitude.
-    const visible = upwardCrossing(
-      new Date(rise.getTime() + 5 * 60 * 1000),
-      new Date(rise.getTime() + 12 * HOUR),
-      MIN_MOON_ALTITUDE
-    );
+  const suggestedTime = altitude15 &&
+    !Number.isNaN(dusk.getTime())
+      ? new Date(Math.max(
+          altitude15.getTime(),
+          dusk.getTime()
+        ))
+      : null;
 
-    return { rise, visible };
+  // -------- DISPLAY --------
+
+  moonriseEl.textContent = moonrise
+    ? viewingDate(moonrise)
+    : 'Unavailable';
+
+  if (suggestedTime) {
+    visibleEl.textContent = viewingDate(suggestedTime);
+
+    noteEl.textContent =
+      `Suggested viewing evening: ${formatDate(viewingDay)}. ` +
+      `Moon at least ${MIN_MOON_ALTITUDE}° high ` +
+      `and after civil twilight. ` +
+      `Actual visibility depends on trees and clouds.`;
+  } else {
+    visibleEl.textContent = 'Unavailable';
+
+    noteEl.textContent =
+      'Could not find a suitable evening viewing time.';
   }
 
-  if (fullMoon) {
-    const viewing = getFullMoonViewing(fullMoon);
-
-    if (viewing) {
-      const viewingDate = date =>
-        `${formatDate(date)}, ${formatTime(date)}`;
-
-      moonriseEl.textContent = viewingDate(viewing.rise);
-
-      if (viewing.visible) {
-        visibleEl.textContent =
-          viewingDate(viewing.visible);
-
-        noteEl.textContent =
-          'Approximate 15° altitude. Actual visibility depends on trees, terrain and clouds.';
-      } else {
-        visibleEl.textContent = 'Not reached';
-        noteEl.textContent =
-          'Moon may not reach 15° during this rise.';
-      }
-    } else {
-      moonriseEl.textContent = 'Unavailable';
-      visibleEl.textContent = 'Unavailable';
-      noteEl.textContent = 'Could not calculate moonrise.';
-    }
-  }
 
 
   console.info('[SunMoon]', {
     sunrise: formatTime(sunrise),
     sunset: formatTime(sunset),
-    fullMoon: fullMoon?.toISOString()
+    fullMoon: fullMoon.toISOString(),
+    viewingDay: formatDate(viewingDay),
+    moonrise: moonrise?.toISOString(),
+    altitude15: altitude15?.toISOString(),
+    civilDusk: dusk?.toISOString(),
+    suggestedTime: suggestedTime?.toISOString()
   });
 }
 
