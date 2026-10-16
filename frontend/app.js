@@ -952,10 +952,9 @@ function loadSunMoon() {
     visibleEl.textContent = viewingDate(suggestedTime);
 
     noteEl.textContent =
-      `Suggested viewing evening: ${formatDate(viewingDay)}. ` +
-      `Moon at least ${MIN_MOON_ALTITUDE}° high ` +
-      `and after civil twilight. ` +
-      `Actual visibility depends on trees and clouds.`;
+      `Suggested viewing evening: ${formatDate(viewingDay)}, ` +
+      `based on moon being at least ${MIN_MOON_ALTITUDE}° high ` +
+      `and after sunset.`;
   } else {
     visibleEl.textContent = 'Unavailable';
 
