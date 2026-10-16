@@ -675,6 +675,192 @@ function ensureSantaHat() {
   }
 }
 
+
+function loadSunMoon() {
+  const LAT = 51.50144;
+  const LON = -0.870961;
+  const TZ = 'Europe/London';
+
+  const $sm = id => document.getElementById(id);
+
+  if (!window.SunCalc) {
+    console.error('[SunMoon] SunCalc library failed to load');
+    $sm('fullMoonDetail').textContent = 'Astronomy data unavailable';
+    return;
+  }
+
+  const now = new Date();
+
+  // Always calculate and display dates using UK local time
+  const ukParts = date => {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: TZ,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      hourCycle: 'h23'
+    }).formatToParts(date);
+
+    const values = Object.fromEntries(
+      parts.filter(p => p.type !== 'literal')
+           .map(p => [p.type, Number(p.value)])
+    );
+
+    return {
+      year: values.year,
+      month: values.month,
+      day: values.day,
+      hour: values.hour
+    };
+  };
+
+  const formatTime = date =>
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: TZ,
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(date);
+
+  const formatDate = date =>
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: TZ,
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short'
+    }).format(date);
+
+  // Use noon UTC to represent the correct UK calendar date.
+  // This avoids problems around midnight and DST.
+  const today = ukParts(now);
+
+  const dayAt = offset =>
+    new Date(Date.UTC(
+      today.year,
+      today.month - 1,
+      today.day + offset,
+      12, 0, 0
+    ));
+
+  // -------- SUNRISE --------
+
+  const todaySun = SunCalc.getTimes(dayAt(0), LAT, LON);
+  const tomorrowSun = SunCalc.getTimes(dayAt(1), LAT, LON);
+
+  // Show today's sunrise until 9am UK time.
+  const sunriseIsTomorrow = today.hour >= 9;
+
+  const sunrise = sunriseIsTomorrow
+    ? tomorrowSun.sunrise
+    : todaySun.sunrise;
+
+  $sm('sunriseTime').textContent = formatTime(sunrise);
+  $sm('sunriseDay').textContent =
+    sunriseIsTomorrow ? 'Tomorrow' : 'Today';
+
+  // -------- SUNSET --------
+
+  // Show today's sunset until it has passed.
+  const sunsetIsTomorrow = now >= todaySun.sunset;
+
+  const sunset = sunsetIsTomorrow
+    ? tomorrowSun.sunset
+    : todaySun.sunset;
+
+  $sm('sunsetTime').textContent = formatTime(sunset);
+  $sm('sunsetDay').textContent =
+    sunsetIsTomorrow ? 'Tomorrow' : 'Today';
+
+  // -------- NEXT FULL MOON --------
+
+  // SunCalc's lunar phase runs from:
+  // 0 = new moon, 0.25 = first quarter,
+  // 0.5 = full moon, 0.75 = last quarter.
+  //
+  // Search forward in six-hour increments, then refine
+  // the moment when phase crosses 0.5.
+
+  const phaseAt = date =>
+    SunCalc.getMoonIllumination(date).phase;
+
+  function findNextFullMoon(startDate) {
+    const step = 6 * 60 * 60 * 1000;
+    const maxSearch = 36 * 24 * 60 * 60 * 1000;
+
+    let previous = startDate.getTime();
+    let previousPhase = phaseAt(new Date(previous));
+
+    for (
+      let current = previous + step;
+      current <= startDate.getTime() + maxSearch;
+      current += step
+    ) {
+      const currentPhase = phaseAt(new Date(current));
+
+      if (previousPhase < 0.5 && currentPhase >= 0.5) {
+        // Binary search to approximately one minute.
+        let low = previous;
+        let high = current;
+
+        while (high - low > 60000) {
+          const middle = (low + high) / 2;
+          const phase = phaseAt(new Date(middle));
+
+          if (phase < 0.5) {
+            low = middle;
+          } else {
+            high = middle;
+          }
+        }
+
+        return new Date((low + high) / 2);
+      }
+
+      previous = current;
+      previousPhase = currentPhase;
+    }
+
+    return null;
+  }
+
+  const fullMoon = findNextFullMoon(now);
+
+  if (fullMoon) {
+    $sm('fullMoonDate').textContent =
+      `${formatDate(fullMoon)} · ${formatTime(fullMoon)}`;
+
+    const remainingMs = fullMoon.getTime() - now.getTime();
+    const remainingHours = Math.ceil(remainingMs / 3600000);
+    const remainingDays = Math.ceil(remainingMs / 86400000);
+
+    let countdown;
+
+    if (remainingHours <= 1) {
+      countdown = 'Less than an hour away';
+    } else if (remainingHours < 24) {
+      countdown = `In ${remainingHours} hours`;
+    } else if (remainingDays === 1) {
+      countdown = 'Tomorrow';
+    } else {
+      countdown = `In ${remainingDays} days`;
+    }
+
+    $sm('fullMoonDetail').textContent =
+      `${countdown} · Estimated full moon (UK time)`;
+  } else {
+    $sm('fullMoonDate').textContent = 'Unavailable';
+    $sm('fullMoonDetail').textContent =
+      'Could not calculate the next full moon';
+  }
+
+  console.info('[SunMoon]', {
+    sunrise: formatTime(sunrise),
+    sunset: formatTime(sunset),
+    fullMoon: fullMoon?.toISOString()
+  });
+}
+
+
 /* ========= Collapsible forecast & initial loads ========= */
 window.addEventListener('DOMContentLoaded', () => {
   // collapse forecast by default
@@ -707,6 +893,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadEDM();
   loadWeather();
   loadBoards("Shiplake Lock to Marsh Lock");
+  loadSunMoon();
 
 
   // range button handlers
