@@ -952,7 +952,7 @@ function loadSunMoon() {
     visibleEl.textContent = viewingDate(suggestedTime);
 
     noteEl.textContent =
-      `Suggested viewing evening: ${formatDate(viewingDay)}, ` +
+      `Suggested swim evening: ${formatDate(viewingDay)}, ` +
       `based on moon being at least ${MIN_MOON_ALTITUDE}° high ` +
       `and after sunset.`;
   } else {
