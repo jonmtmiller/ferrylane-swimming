@@ -193,3 +193,72 @@ a { color: var(--accent); }
 }
 
 
+/* Sun & Moon card */
+.sunmoon-card {
+  margin-top: 12px;
+}
+
+.sunmoon-daily {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sunmoon-item {
+  min-width: 0;
+  padding: 12px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+}
+
+.sunmoon-label {
+  font-size: .9rem;
+  color: var(--muted);
+}
+
+.sunmoon-time {
+  margin-top: 5px;
+  font-size: clamp(1.4rem, 2.5vw, 1.9rem);
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.sunmoon-moon {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  background: rgba(255,255,255,.04);
+}
+
+.sunmoon-moon-icon {
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+.sunmoon-moon-date {
+  margin-top: 5px;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+@media (max-width: 380px) {
+  .sunmoon-daily {
+    gap: 8px;
+  }
+
+  .sunmoon-item {
+    padding: 9px;
+  }
+
+  .sunmoon-time {
+    font-size: 1.35rem;
+  }
+}
+
