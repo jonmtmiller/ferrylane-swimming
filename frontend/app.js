@@ -853,6 +853,123 @@ function loadSunMoon() {
       'Could not calculate the next full moon';
   }
 
+  
+  // -------- FULL MOON VIEWING --------
+
+  // Suggested minimum altitude to clear the opposite-bank trees.
+  // Adjust after observing a couple of full moon swims.
+  const MIN_MOON_ALTITUDE = 15;
+
+  const moonriseEl = document.getElementById('moonriseTime');
+  const visibleEl = document.getElementById('moonVisibleTime');
+  const noteEl = document.getElementById('moonViewingNote');
+
+  const moonAltitude = date =>
+    SunCalc.getMoonPosition(date, LAT, LON).altitude * 180 / Math.PI;
+
+  // Detect when an angle is crossed going upwards.
+  // Interpolate between samples for a more precise estimate.
+  function upwardCrossing(start, end, targetDegrees) {
+    const stepMs = 5 * 60 * 1000;
+
+    let previous = start.getTime();
+    let previousAltitude = moonAltitude(new Date(previous));
+
+    for (
+      let current = previous + stepMs;
+      current <= end.getTime();
+      current += stepMs
+    ) {
+      const currentAltitude = moonAltitude(new Date(current));
+
+      if (
+        previousAltitude < targetDegrees &&
+        currentAltitude >= targetDegrees
+      ) {
+        const fraction =
+          (targetDegrees - previousAltitude) /
+          (currentAltitude - previousAltitude);
+
+        return new Date(
+          previous + fraction * (current - previous)
+        );
+      }
+
+      previous = current;
+      previousAltitude = currentAltitude;
+    }
+
+    return null;
+  }
+
+  function getFullMoonViewing(fullMoonDate) {
+    const HOUR = 60 * 60 * 1000;
+
+    // Search around the full moon for moonrises.
+    const start = new Date(fullMoonDate.getTime() - 36 * HOUR);
+    const end = new Date(fullMoonDate.getTime() + 36 * HOUR);
+
+    const rises = [];
+    let cursor = start;
+
+    while (cursor < end) {
+      const next = upwardCrossing(cursor, end, 0);
+      if (!next) break;
+
+      rises.push(next);
+
+      // Advance beyond this crossing before looking for another.
+      cursor = new Date(next.getTime() + 6 * HOUR);
+    }
+
+    if (!rises.length) return null;
+
+    // Find the moonrise closest to the exact full moon.
+    const rise = rises.reduce((best, candidate) =>
+      Math.abs(candidate - fullMoonDate) <
+      Math.abs(best - fullMoonDate)
+        ? candidate
+        : best
+    );
+
+    // Calculate when it rises to our preferred 15° altitude.
+    const visible = upwardCrossing(
+      new Date(rise.getTime() + 5 * 60 * 1000),
+      new Date(rise.getTime() + 12 * HOUR),
+      MIN_MOON_ALTITUDE
+    );
+
+    return { rise, visible };
+  }
+
+  if (fullMoon) {
+    const viewing = getFullMoonViewing(fullMoon);
+
+    if (viewing) {
+      const viewingDate = date =>
+        `${formatDate(date)}, ${formatTime(date)}`;
+
+      moonriseEl.textContent = viewingDate(viewing.rise);
+
+      if (viewing.visible) {
+        visibleEl.textContent =
+          viewingDate(viewing.visible);
+
+        noteEl.textContent =
+          'Approximate 15° altitude. Actual visibility depends on trees, terrain and clouds.';
+      } else {
+        visibleEl.textContent = 'Not reached';
+        noteEl.textContent =
+          'Moon may not reach 15° during this rise.';
+      }
+    } else {
+      moonriseEl.textContent = 'Unavailable';
+      visibleEl.textContent = 'Unavailable';
+      noteEl.textContent = 'Could not calculate moonrise.';
+    }
+  }
+
+
   console.info('[SunMoon]', {
     sunrise: formatTime(sunrise),
     sunset: formatTime(sunset),
